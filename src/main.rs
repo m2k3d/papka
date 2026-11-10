@@ -1,4 +1,5 @@
 mod app;
+pub mod history;
 pub mod operations;
 pub mod platform;
 mod ui;
