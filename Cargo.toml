@@ -1,0 +1,8 @@
+[package]
+name = "papka"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+iced = "0.14.0"
