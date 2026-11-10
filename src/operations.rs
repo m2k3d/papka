@@ -30,6 +30,7 @@ impl Completion {
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    Data { id: OperationId, data: crate::files::Data },
     Started(OperationId),
     Progress { id: OperationId, completed: u64, total: Option<u64> },
     Finished { id: OperationId, completion: Completion },
@@ -49,9 +50,19 @@ pub struct Context {
     events: Sender<Event>,
     id: OperationId,
     last_progress: Option<Instant>,
+    copied_bytes: u64,
 }
 
 impl Context {
+    pub fn data(&self, data: crate::files::Data) {
+        let _ = self.events.send_blocking(Event::Data { id: self.id, data });
+    }
+
+    pub fn copied(&mut self, bytes: u64) {
+        self.copied_bytes = self.copied_bytes.saturating_add(bytes);
+        self.progress(self.copied_bytes, None);
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.is_requested()
             || self.shutdown.load(Ordering::Acquire)
@@ -182,7 +193,7 @@ fn spawn_worker(name: &str, jobs: Receiver<Job>, events: Sender<Event>, shutdown
         while let Ok(job) = jobs.recv_blocking() {
             let mut context = Context {
                 id: job.id, cancellation: job.cancellation, shutdown: shutdown.clone(),
-                events: events.clone(), last_progress: None,
+                events: events.clone(), last_progress: None, copied_bytes: 0,
             };
             if events.send_blocking(Event::Started(job.id)).is_err() { break; }
             let completion = if context.is_cancelled() {

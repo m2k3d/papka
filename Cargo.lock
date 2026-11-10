@@ -1225,6 +1225,7 @@ dependencies = [
  "iced_core",
  "log",
  "rustc-hash 2.1.3",
+ "tokio",
  "wasm-bindgen-futures",
  "wasmtimer",
 ]
@@ -2141,6 +2142,7 @@ dependencies = [
  "async-channel",
  "dirs",
  "iced",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

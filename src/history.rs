@@ -13,7 +13,7 @@ const MAX_CHECKPOINT_BYTES: usize = 64 * 1024;
 const MAX_PENDING: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Action { Copy, Move, Rename, Trash }
+pub enum Action { Copy, Move, Rename, Trash, CreateFile, CreateDirectory }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResultKind { Success, Partial, Failed, Interrupted }
@@ -98,6 +98,13 @@ impl Journal {
 
     pub fn records(&self) -> &[Record] { &self.document.records }
 
+    pub fn retain_recent(&mut self, now: u64) -> io::Result<()> {
+        let mut next = self.document.clone();
+        prune(&mut next, now);
+        if next.records.len() != self.document.records.len() { self.commit(next)?; }
+        Ok(())
+    }
+
     /// Сначала надёжно записать намерение, затем выполнять файловое действие.
     pub fn begin(&mut self, action: Action, checkpoint: Vec<u8>, now: u64) -> io::Result<u64> {
         if self.document.records.iter().filter(|record| record.finished.is_none()).count() >= MAX_PENDING {
@@ -125,6 +132,15 @@ impl Journal {
         record.checkpoint = checkpoint;
         record.finished = Some(Finished { at: now.max(record.started_at), result });
         prune(&mut next, now);
+        self.commit(next)
+    }
+
+    /// Сохраняет ход отмены, не меняя время и итог исходного действия.
+    pub fn update_record(&mut self, id: u64, checkpoint: Vec<u8>) -> io::Result<()> {
+        let mut next = self.document.clone();
+        let record = next.records.iter_mut().find(|record| record.id == id)
+            .ok_or_else(|| invalid("Запись истории не найдена."))?;
+        record.checkpoint = checkpoint;
         self.commit(next)
     }
 
