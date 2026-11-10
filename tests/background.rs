@@ -317,14 +317,22 @@ fn disconnected_event_consumer_stops_accepting_reads() {
     drop(events);
     let (dropped_tx, dropped_rx) = mpsc::channel();
     let guard = Dropped(dropped_tx);
-    // Worker не может отправить Started, поэтому выходит и уничтожает замыкание.
-    background.read_latest(move |_| {
+    // После отключения получателя отказ должен быть немедленным,
+    // даже если рабочий поток ещё не успел заметить разрыв.
+    let result = background.read_latest(move |_| {
         let _guard = guard;
         panic!("Без получателя событий работа не должна запускаться")
-    }).unwrap();
+    });
+    assert!(matches!(result, Err(SubmitError::Stopped)),
+        "Чтение принято без получателя событий: {result:?}");
     receive(&dropped_rx);
+    let result = background.submit(|_| {
+        panic!("Изменяющее задание без получателя событий не должно запускаться")
+    });
+    assert!(matches!(result, Err(SubmitError::Stopped)),
+        "Изменяющее задание принято без получателя событий: {result:?}");
     let result = background.read_latest(|_| success());
     background.shutdown();
     assert!(matches!(result, Err(SubmitError::Stopped)),
-        "Чтение принято после выхода рабочего потока: {result:?}");
+        "Повторное чтение принято после остановки: {result:?}");
 }
