@@ -1,6 +1,6 @@
 mod app;
 mod operations;
-mod platform;
+pub mod platform;
 mod ui;
 
 fn main() -> std::process::ExitCode {

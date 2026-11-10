@@ -5,4 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
+dirs = "7.0.0"
 iced = "0.14.0"
