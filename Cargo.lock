@@ -2132,6 +2132,7 @@ dependencies = [
 name = "papka"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "dirs",
  "iced",
 ]

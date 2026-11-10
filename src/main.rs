@@ -1,5 +1,5 @@
 mod app;
-mod operations;
+pub mod operations;
 pub mod platform;
 mod ui;
 
