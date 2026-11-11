@@ -6,6 +6,7 @@ mod input;
 mod message;
 mod overlays;
 mod palette;
+mod palette_field;
 mod panels;
 mod sidebar;
 mod style;

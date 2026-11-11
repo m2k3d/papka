@@ -10,7 +10,7 @@ pub(super) fn action<'a>(
 ) -> iced::widget::Button<'a, Message> {
     button(text(label).size(14))
         .padding([8, 12])
-        .style(button::text)
+        .style(super::style::action_button)
         .on_press_maybe(enabled.then_some(message))
 }
 

@@ -9,7 +9,19 @@ use iced::{
 pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
     match event {
         iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-            app.set_pointer(position)
+            app.set_pointer(position);
+            if let Some(offset) = app.sidebar_drag_offset {
+                app.sidebar_width = position.x - 8.0 - offset;
+                app.sidebar_width = super::sidebar::sidebar_width(app);
+            }
+        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))
+        | iced::Event::Mouse(iced::mouse::Event::CursorLeft)
+        | iced::Event::Window(iced::window::Event::Unfocused) => {
+            app.sidebar_drag_offset = None;
+        }
+        iced::Event::Window(iced::window::Event::Resized(size)) => {
+            app.window_width = size.width;
         }
         iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button))
             if matches!(

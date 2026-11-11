@@ -8,6 +8,18 @@ use iced::Task;
 
 pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        Message::SidebarResizeStart => {
+            if app.context_menu.is_none()
+                && !app.show_path
+                && !app.show_palette
+                && app.dialog.is_none()
+                && app.conflict.is_none()
+                && !app.closing
+            {
+                app.sidebar_drag_offset =
+                    Some(app.pointer.x - 8.0 - super::sidebar::sidebar_width(app));
+            }
+        }
         Message::Context(target) => {
             if !app.open_context(target, false) {
                 return Task::none();
@@ -40,6 +52,18 @@ pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Navigate(path) => app.navigate(path),
         Message::Palette => app.open_palette(),
         Message::ClosePalette => app.close_palette(),
+        Message::PaletteSelect(index) => {
+            app.palette_active = index.min(app.settings.palette_count.clamp(1, 3) as usize - 1)
+        }
+        Message::PalettePoint(index, position) => {
+            if index < app.settings.palette_count.clamp(1, 3) as usize {
+                app.palette_active = index;
+                app.settings.palette_positions[index] = position.map(|v| v.clamp(0.0, 1.0));
+            }
+        }
+        Message::PaletteIntensity(value) => app.settings.palette_intensity = value.clamp(0.0, 1.0),
+        Message::PaletteCommit => app.persist_settings(),
+        Message::PaletteCombination => app.cycle_palette_combination(),
         Message::PaletteCount(count) => app.set_palette_count(count),
         Message::PaletteColor(index, value) => app.set_palette_color(index, value),
         Message::Preset(colors) => app.set_palette(colors),

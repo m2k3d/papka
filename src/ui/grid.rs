@@ -11,6 +11,85 @@ use iced::{Element, Fill, Length, Theme};
 
 pub(super) const PAGE_SIZE: usize = 200;
 
+// Измеряем тем же движком и шрифтом, которыми Iced рисует подпись.
+fn filename_label(name: &str, directory: bool, width: f32) -> String {
+    use iced::advanced::{
+        graphics::text::Paragraph,
+        text::{Paragraph as _, Text},
+    };
+    use unicode_segmentation::UnicodeSegmentation;
+    let name = name.replace(['\n', '\r', '\t'], " ");
+    let fits = |value: &str| {
+        let paragraph = Paragraph::with_text(Text {
+            content: value,
+            bounds: iced::Size::new(f32::INFINITY, f32::INFINITY),
+            size: 13.into(),
+            line_height: text::LineHeight::Absolute(16.into()),
+            font: iced::Font::with_name("CaskaydiaCove Nerd Font"),
+            align_x: iced::advanced::text::Alignment::Left,
+            align_y: iced::alignment::Vertical::Top,
+            shaping: text::Shaping::Advanced,
+            wrapping: text::Wrapping::None,
+        });
+        paragraph.min_width() <= width.max(0.0)
+    };
+    let prefix = |value: &str, suffix: &str| {
+        let boundaries: Vec<_> = value
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .chain(std::iter::once(value.len()))
+            .collect();
+        let (mut low, mut high) = (0, boundaries.len() - 1);
+        while low < high {
+            let mid = (low + high).div_ceil(2);
+            if fits(&format!("{}{}", &value[..boundaries[mid]], suffix)) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        boundaries[low]
+    };
+    if fits(&name) {
+        return name;
+    }
+    let mut split = prefix(&name, "");
+    // Сначала переносим по словам / дефисам, длинное слово — по графемам.
+    if let Some((index, ch)) = name[..split]
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| ch.is_whitespace() || *ch == '-' || *ch == '_')
+    {
+        let boundary = index + ch.len_utf8();
+        if boundary >= split / 2 {
+            split = boundary;
+        }
+    }
+    let first = name[..split].trim_end();
+    let rest = name[split..].trim_start();
+    if fits(rest) {
+        return format!("{first}\n{rest}");
+    }
+    let extension = if directory {
+        ""
+    } else {
+        [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"]
+            .into_iter()
+            .find(|suffix| name.ends_with(suffix))
+            .or_else(|| {
+                name.rsplit_once('.')
+                    .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
+                    .map(|(_, ext)| &name[name.len() - ext.len() - 1..])
+            })
+            .unwrap_or("")
+    };
+    let suffix = format!("…{extension}");
+    let suffix = if fits(&suffix) { suffix } else { "…".into() };
+    let stem = rest.strip_suffix(extension).unwrap_or(rest);
+    let end = prefix(stem, &suffix);
+    format!("{first}\n{}{}", stem[..end].trim_end(), suffix)
+}
+
 pub(super) fn file_grid<'a>(
     app: &'a App,
     idle: bool,
@@ -47,20 +126,28 @@ pub(super) fn file_grid<'a>(
             let icon = file_icon(entry.directory, entry.link);
             let card = column![
                 container(icon).center_x(Fill).height(68),
-                text(&entry.name)
-                    .size(13)
-                    .width(Fill)
-                    .align_x(iced::Center)
-                    .color({
-                        let opacity = if app.settings.reduced_motion {
-                            1.0
-                        } else {
-                            app.transition.map_or(1.0, |start| {
-                                0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.0)
-                            })
-                        };
-                        theme(app.settings.dark).palette().text.scale_alpha(opacity)
-                    }),
+                text(filename_label(
+                    &entry.name,
+                    entry.directory,
+                    card_width - 12.0
+                ))
+                .size(13)
+                .height(32)
+                .line_height(text::LineHeight::Absolute(16.into()))
+                .shaping(text::Shaping::Advanced)
+                .wrapping(text::Wrapping::None)
+                .width(Fill)
+                .align_x(iced::Center)
+                .color({
+                    let opacity = if app.settings.reduced_motion {
+                        1.0
+                    } else {
+                        app.transition.map_or(1.0, |start| {
+                            0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.0)
+                        })
+                    };
+                    theme(app.settings.dark).palette().text.scale_alpha(opacity)
+                }),
             ]
             .spacing(4)
             .align_x(iced::Center);

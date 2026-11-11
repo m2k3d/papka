@@ -24,18 +24,14 @@ pub(super) fn notices<'a>(
                 .spacing(12),
             )
             .padding(12)
-            .style(container::bordered_box),
+            .style(super::style::bordered_panel),
         );
     }
     if app.conflict.is_some() {
         content = content.push(
             row![
                 text("This name is already in use. How would you like to proceed?").size(14),
-                action(
-                    "Change name / destination",
-                    Message::ResolveConflict,
-                    ready
-                ),
+                action("Change name / destination", Message::ResolveConflict, ready),
                 action("Leave unchanged", Message::ClearError, true)
             ]
             .spacing(12),
@@ -75,7 +71,7 @@ pub(super) fn operation_dialog<'a>(
                 .spacing(12),
             )
             .padding(20)
-            .style(container::bordered_box),
+            .style(super::style::bordered_panel),
         );
     }
     content
@@ -112,7 +108,7 @@ pub(super) fn settings(app: &App) -> Element<'_, Message> {
         .spacing(16),
     )
     .padding(20)
-    .style(container::bordered_box)
+    .style(super::style::bordered_panel)
     .into()
 }
 
@@ -144,7 +140,11 @@ pub(super) fn history(app: &App, idle: bool) -> Element<'_, Message> {
                 idle,
             ));
         }
-        history = history.push(action("Paths and details", Message::Details(record.id), true));
+        history = history.push(action(
+            "Paths and details",
+            Message::Details(record.id),
+            true,
+        ));
         if app.expanded_history == Some(record.id) {
             for detail in &record.details {
                 history = history.push(text(detail).size(12));

@@ -57,7 +57,7 @@ fn sidebar_tool<'a>(
             .on_press_maybe(enabled.then_some(message)),
         container(text(label).size(12))
             .padding(8)
-            .style(container::rounded_box),
+            .style(super::style::panel),
         iced::widget::tooltip::Position::Top,
     )
     .into()
@@ -143,7 +143,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
                     destination,
                     container(text(path.to_string_lossy().into_owned()).size(12))
                         .padding(8)
-                        .style(container::rounded_box),
+                        .style(super::style::panel),
                     iced::widget::tooltip::Position::Right,
                 )
                 .gap(4),
@@ -169,8 +169,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         );
     let tools = row![
         sidebar_tool("history", "History", Message::History, true),
-        space().width(Fill),
-        sidebar_tool("palette", "Appearance colors", Message::Palette, true)
+        space().width(Fill)
     ]
     .spacing(4)
     .align_y(iced::Center);
@@ -187,7 +186,19 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         tools
     ]
     .spacing(8);
-    mouse_area(container(panel).padding([10, 8]).width(196).height(Fill))
-        .on_right_press(Message::SidebarContext(None))
-        .into()
+    mouse_area(
+        container(panel)
+            .padding([10, 8])
+            .width(sidebar_width(app))
+            .height(Fill),
+    )
+    .on_right_press(Message::SidebarContext(None))
+    .into()
+}
+
+// Основной области оставляем минимум 240 пикселей, панели — до 480.
+pub(super) fn sidebar_width(app: &App) -> f32 {
+    let available = (app.window_width - 16.0 - 8.0 - 240.0).max(0.0);
+    app.sidebar_width
+        .clamp(160.0_f32.min(available), 480.0_f32.min(available))
 }

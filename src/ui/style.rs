@@ -107,3 +107,27 @@ pub(super) fn theme(dark: bool) -> Theme {
     });
     if dark { DARK.clone() } else { LIGHT.clone() }
 }
+
+// Общая геометрия поверхностей и элементов управления.
+pub(super) const PANEL_RADIUS: f32 = 12.0;
+
+pub(super) fn panel(theme: &Theme) -> iced::widget::container::Style {
+    let mut style = iced::widget::container::rounded_box(theme);
+    style.border.radius = PANEL_RADIUS.into();
+    style
+}
+
+pub(super) fn bordered_panel(theme: &Theme) -> iced::widget::container::Style {
+    let mut style = iced::widget::container::bordered_box(theme);
+    style.border.radius = PANEL_RADIUS.into();
+    style
+}
+
+pub(super) fn action_button(
+    theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    let mut style = iced::widget::button::text(theme, status);
+    style.border.radius = 8.into();
+    style
+}

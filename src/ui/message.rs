@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub(super) enum Message {
+    SidebarResizeStart,
     Context(Option<PathBuf>),
     SidebarContext(Option<PathBuf>),
     CloseContext,
@@ -42,6 +43,11 @@ pub(super) enum Message {
     Settings,
     Palette,
     ClosePalette,
+    PaletteSelect(usize),
+    PalettePoint(usize, [f32; 2]),
+    PaletteCombination,
+    PaletteIntensity(f32),
+    PaletteCommit,
     PaletteCount(u8),
     PaletteColor(usize, String),
     Preset([u32; 3]),

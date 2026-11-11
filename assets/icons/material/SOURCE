@@ -4,3 +4,7 @@ License: Apache-2.0 (see LICENSE)
 Original SVG files, unmodified. Local filenames match papka icon roles.
 Symbolic links use the official link icon as an overlay on folder/file icons.
 file-symlink: link.
+
+minus: content/remove/materialiconsround/24px.svg (official, unmodified).
+
+sun: image/wb_sunny; moon: image/bedtime; combination: image/auto_awesome_motion; reset: navigation/refresh (official Material Round SVG, unmodified).

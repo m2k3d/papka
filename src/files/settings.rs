@@ -16,6 +16,9 @@ pub struct Settings {
     pub dark: bool,
     pub palette: [u32; 3],
     pub palette_count: u8,
+    pub palette_positions: [[f32; 2]; 3],
+    pub palette_intensity: f32,
+    pub palette_combination: u8,
     pub reduced_motion: bool,
     pub quick_access: Vec<PathBuf>,
 }
@@ -28,6 +31,9 @@ impl Default for Settings {
             dark: false,
             palette: [0xc7c2df, 0xe7c4b5, 0xb8cddd],
             palette_count: 3,
+            palette_positions: [[0.64, 0.28], [0.25, 0.5], [0.57, 0.76]],
+            palette_intensity: 0.35,
+            palette_combination: 0,
             reduced_motion: false,
             quick_access: default_quick_access(),
         }

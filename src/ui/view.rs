@@ -1,7 +1,9 @@
 //! Сборка основного окна из компонентов интерфейса.
-use super::{Message, grid, panels, sidebar::sidebar, style::palette_background};
+use super::{Message, grid, panels, sidebar::sidebar};
 use crate::app::App;
-use iced::widget::{column, container, mouse_area, row, rule::horizontal as horizontal_rule, text};
+use iced::widget::{
+    column, container, mouse_area, row, rule::horizontal as horizontal_rule, space, text,
+};
 use iced::{Element, Fill, Theme};
 
 pub(super) fn view(app: &App) -> Element<'_, Message> {
@@ -48,19 +50,44 @@ pub(super) fn view(app: &App) -> Element<'_, Message> {
                     .into(),
                 ),
                 border: iced::Border {
-                    radius: 6.into(),
+                    radius: super::style::PANEL_RADIUS.into(),
                     ..Default::default()
                 },
                 ..Default::default()
             }),
     );
     let surface = surface.on_right_press(Message::Context(None));
-    let shell = container(row![sidebar(app), surface].spacing(6))
+    let divider = mouse_area(container(space()).width(8).height(Fill))
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .on_press(Message::SidebarResizeStart);
+    let shell = container(row![sidebar(app), divider, surface])
         .padding(8)
         .height(Fill)
         .style(move |_: &Theme| container::Style {
-            background: Some(palette_background(app)),
+            background: None,
             ..Default::default()
         });
-    super::overlays::show(app, shell.into(), idle)
+    let shell: Element<'_, Message> = if app.sidebar_drag_offset.is_some() {
+        mouse_area(shell)
+            .interaction(iced::mouse::Interaction::ResizingHorizontally)
+            .into()
+    } else {
+        shell.into()
+    };
+    let background = iced::widget::canvas(super::palette_field::Field {
+        settings: &app.settings,
+        active: 0,
+        editor: false,
+    })
+    .width(Fill)
+    .height(Fill);
+    let background = container(background)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| container::Style {
+            background: Some(super::style::palette_background(app)),
+            ..Default::default()
+        });
+    // Прозрачная оболочка поверх пространственного фона.
+    super::overlays::show(app, iced::widget::stack![background, shell].into(), idle)
 }

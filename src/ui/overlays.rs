@@ -39,8 +39,7 @@ pub(super) fn show<'a>(
                     .on_submit(Message::Go)
                     .padding(12),
                 row![
-                    action("Copy full path", Message::CopyPath, true),
-                    action("Go", Message::Go, true)
+                    action("Copy full path", Message::CopyPath, true)
                 ]
                 .spacing(8)
                 .wrap(),
@@ -49,7 +48,7 @@ pub(super) fn show<'a>(
         )
         .padding(20)
         .width(560)
-        .style(container::rounded_box);
+        .style(super::style::panel);
         stack![
             shell,
             backdrop(Message::ClosePath, true),
@@ -79,7 +78,7 @@ pub(super) fn show<'a>(
                     .padding(6)
                     .width(width)
                     .max_height(height)
-                    .style(container::rounded_box),
+                    .style(super::style::panel),
             ))
             .padding(iced::Padding {
                 left: position.x.clamp(8.0, (size.width - width - 8.0).max(8.0)),

@@ -11,6 +11,12 @@ pub(super) fn subscription(app: &App) -> Subscription<Message> {
             if matches!(
                 event,
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { .. })
+                    | iced::Event::Mouse(iced::mouse::Event::CursorLeft)
+                    | iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left
+                    ))
+                    | iced::Event::Window(iced::window::Event::Resized(_))
+                    | iced::Event::Window(iced::window::Event::Unfocused)
                     | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
                         iced::mouse::Button::Back | iced::mouse::Button::Forward
                     ))
@@ -53,9 +59,7 @@ fn background_events() -> impl Stream<Item = Message> {
         }
         Err(_) => {
             let _ = output
-                .send(Message::Failed(
-                    "Could not start background tasks.".into(),
-                ))
+                .send(Message::Failed("Could not start background tasks.".into()))
                 .await;
         }
     })

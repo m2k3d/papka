@@ -1,127 +1,96 @@
-//! Редактор цветов оформления.
-use super::{
-    Message,
-    style::{palette_background, rgb},
-    widgets::action,
-};
+//! Редактор цветовых точек, готовых оттенков и пространственных сочетаний.
+use super::{Message, icons::sidebar_icon, palette_field::Field, style::rgb};
 use crate::app::App;
-use iced::widget::{
-    button, checkbox, column, container, row, scrollable, slider, space, text, text_input,
-};
+use iced::widget::{button, canvas, column, container, row, scrollable, slider, space, text_input};
 use iced::{Element, Fill};
 
 pub(super) fn palette_editor(app: &App) -> Element<'_, Message> {
-    let mut editor = column![
-        row![
-            text("Appearance colors").size(20).width(Fill),
-            action("×", Message::ClosePalette, true)
-        ]
-        .align_y(iced::Center),
-        text("Solid color or smooth gradient").size(12),
-        container(space())
-            .height(64)
-            .width(Fill)
-            .style(move |_| container::Style {
-                background: Some(palette_background(app)),
-                border: iced::Border {
-                    radius: 10.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
-        row![
-            action("1 color", Message::PaletteCount(1), true),
-            action("2 colors", Message::PaletteCount(2), true),
-            action("3 colors", Message::PaletteCount(3), true)
-        ]
-        .spacing(4)
-    ]
-    .spacing(14);
-    for index in 0..app.settings.palette_count.clamp(1, 3) as usize {
-        let swatch = rgb(app.settings.palette[index]);
-        editor = editor.push(
-            row![
+    let count = app.settings.palette_count.clamp(1, 3);
+    let active = app.palette_active.min(count as usize - 1);
+    let icon_button = |name, message, enabled| {
+        button(sidebar_icon(name, enabled))
+            .padding(8)
+            .style(super::style::action_button)
+            .on_press_maybe(enabled.then_some(message))
+    };
+    let mut presets = row![].spacing(6);
+    for color in [
+        0xf5efdc, 0xefb5cd, 0xe7b4e4, 0xd77388, 0xef896f, 0xe4d47f, 0x50dfad, 0x929fb9,
+    ] {
+        presets = presets.push(
+            button(
                 container(space())
-                    .width(28)
-                    .height(28)
+                    .width(26)
+                    .height(26)
                     .style(move |_| container::Style {
-                        background: Some(swatch.into()),
+                        background: Some(rgb(color).into()),
                         border: iced::Border {
-                            radius: 7.into(),
+                            radius: 13.into(),
                             ..Default::default()
                         },
                         ..Default::default()
                     }),
-                text_input("RRGGBB", &app.palette_inputs[index])
-                    .on_input(move |value| Message::PaletteColor(index, value))
-                    .padding(8)
-            ]
-            .spacing(10),
-        );
-        let color = app.settings.palette[index];
-        for (label, shift) in [("R", 16), ("G", 8), ("B", 0)] {
-            editor = editor.push(
-                row![
-                    text(label).size(11).width(14),
-                    slider(0..=255, ((color >> shift) & 255) as u8, move |value| {
-                        let next = (color & !(255 << shift)) | ((value as u32) << shift);
-                        Message::PaletteColor(index, format!("{next:06X}"))
-                    })
-                ]
-                .spacing(8)
-                .align_y(iced::Center),
-            );
-        }
-    }
-    editor = editor.push(text("Presets").size(12));
-    let mut presets = row![].spacing(8);
-    for colors in [
-        [0xc7c2df, 0xe7c4b5, 0xb8cddd],
-        [0xb6d5c6, 0xdbe1b4, 0xb4ced1],
-        [0xe5b8c8, 0xb7b7e3, 0xa8cadf],
-        [0xb9bec8, 0xd8dce3, 0xc6ccd6],
-    ] {
-        presets = presets.push(
-            button(container(space()).width(48).height(24).style(move |_| {
-                container::Style {
-                    background: Some(iced::Background::Gradient(
-                        iced::gradient::Linear::new(iced::Radians(0.7))
-                            .add_stop(0.0, rgb(colors[0]))
-                            .add_stop(0.5, rgb(colors[1]))
-                            .add_stop(1.0, rgb(colors[2]))
-                            .into(),
-                    )),
-                    border: iced::Border {
-                        radius: 6.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            }))
-            .padding(2)
-            .style(button::text)
-            .on_press(Message::Preset(colors)),
-        );
-    }
-    editor = editor
-        .push(presets)
-        .push(
-            checkbox(app.settings.dark)
-                .label("Dark theme")
-                .on_toggle(Message::Dark),
-        )
-        .push(
-            text(
-                "HEX: 6 characters. Changes apply immediately.
-Press Esc or click outside to close.",
             )
-            .size(11),
+            .padding(3)
+            .style(super::style::action_button)
+            .on_press(Message::PaletteColor(active, format!("{color:06X}"))),
         );
-    container(scrollable(editor).height(Fill))
-        .padding(22)
-        .width(350)
-        .height(Fill)
-        .max_height(640)
-        .style(container::rounded_box)
+    }
+    let editor = column![
+        row![
+            icon_button("sun", Message::Dark(false), app.settings.dark),
+            icon_button("moon", Message::Dark(true), !app.settings.dark),
+            space().width(Fill),
+            icon_button("x", Message::ClosePalette, true)
+        ]
+        .spacing(6)
+        .align_y(iced::Center),
+        canvas(Field {
+            settings: &app.settings,
+            active,
+            editor: true
+        })
+        .width(Fill)
+        .height(300),
+        row![
+            button(sidebar_icon("plus", count < 3))
+                .padding(8)
+                .style(super::style::action_button)
+                .on_press_maybe((count < 3).then_some(Message::PaletteCount(count + 1))),
+            button(sidebar_icon("minus", count > 1))
+                .padding(8)
+                .style(super::style::action_button)
+                .on_press_maybe((count > 1).then_some(Message::PaletteCount(count - 1))),
+            icon_button("combination", Message::PaletteCombination, count > 1)
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        presets,
+        row![
+            text_input("RRGGBB", &app.palette_inputs[active])
+                .padding(8)
+                .on_input(move |v| Message::PaletteColor(active, v)),
+            icon_button(
+                "reset",
+                Message::Preset([0xc7c2df, 0xe7c4b5, 0xb8cddd]),
+                true
+            )
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        slider(
+            0.0..=1.0,
+            app.settings.palette_intensity.clamp(0.0, 1.0),
+            Message::PaletteIntensity
+        )
+        .step(0.01_f32)
+        .on_release(Message::PaletteCommit)
+    ]
+    .spacing(12);
+    container(scrollable(editor))
+        .padding(20)
+        .width(370)
+        .max_height(660)
+        .style(super::style::panel)
         .into()
 }

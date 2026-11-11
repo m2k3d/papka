@@ -39,12 +39,14 @@ pub(super) fn context_menu<'a>(
                     button(text(label).size(14))
                         .padding([8, 12])
                         .width(Fill)
-                        .style(button::text)
+                        .style(super::style::action_button)
                         .on_press(Message::MenuAction(Box::new(Message::Unpin(path.clone())))),
                 );
             }
         }
-        return menu;
+        return menu
+            .push(horizontal_rule(1))
+            .push(item("Change colors", Message::Palette, true));
     }
     if let Some(path) = target {
         menu = menu
