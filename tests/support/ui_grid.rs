@@ -19,6 +19,8 @@ mod grid_tests {
         surfaces: Vec<(Rectangle, f32)>,
         all_thumbs: Vec<(Rectangle, iced::Color, f32)>,
         svg_handles: Vec<iced::widget::svg::Handle>,
+        has_overlay: bool,
+        inputs: Vec<Rectangle>,
     }
     impl Operation for Geometry {
         fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
@@ -30,6 +32,14 @@ mod grid_tests {
             if value.starts_with("grid-") {
                 self.names.push((value.into(), bounds));
             }
+        }
+        fn text_input(
+            &mut self,
+            _: Option<&Id>,
+            bounds: Rectangle,
+            _: &mut dyn iced::advanced::widget::operation::TextInput,
+        ) {
+            self.inputs.push(bounds);
         }
         fn scrollable(
             &mut self,
@@ -139,6 +149,16 @@ mod grid_tests {
             iced::mouse::Cursor::Unavailable,
             &Rectangle::with_size(size),
         );
+        geometry.has_overlay = element
+            .as_widget_mut()
+            .overlay(
+                &mut tree,
+                Layout::new(&node),
+                &renderer,
+                &Rectangle::with_size(size),
+                iced::Vector::ZERO,
+            )
+            .is_some();
         let mut thumbs = Vec::new();
         if let iced::Renderer::Secondary(r) = &mut renderer {
             for layer in r.layers() {
@@ -409,7 +429,7 @@ mod grid_tests {
                 app.settings.dark = dark;
                 let (g, _, _) = inspect(&app, size, &[]);
                 let (surface, radius) = g.surfaces.iter().find(|(r, _)| r.x > 200.).unwrap();
-                approx(*radius, 6.);
+                approx(*radius, 12.);
                 let left = g
                     .texts
                     .iter()
@@ -437,7 +457,7 @@ mod grid_tests {
         for dark in [false, true] {
             app.settings.dark = dark;
             let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
-            assert!(g.icons.len() >= 7, "SVG не попали в draw: {:?}", g.icons);
+            assert!(g.icons.len() >= 6, "SVG не попали в draw: {:?}", g.icons);
             for (index, (bounds, color)) in g.icons.iter().enumerate() {
                 approx(bounds.width, 24.);
                 approx(bounds.height, 24.);
@@ -472,15 +492,16 @@ mod grid_tests {
         let icons = &g.icons;
         let (_, _, messages) = inspect(&app, size, &click(at(icons[0].0)));
         assert!(!messages.iter().any(|m| matches!(m, Message::Back)));
-        let (_, _, messages) = inspect(&app, size, &click(at(icons[icons.len() - 2].0)));
+        let (_, _, messages) = inspect(&app, size, &click(at(icons[icons.len() - 1].0)));
         assert!(
             messages.iter().any(|m| matches!(m, Message::History)),
             "{messages:?}"
         );
-        let (_, _, messages) = inspect(&app, size, &click(at(icons[icons.len() - 1].0)));
         assert!(
-            messages.iter().any(|m| matches!(m, Message::Palette)),
-            "{messages:?}"
+            !g.svg_handles
+                .contains(&iced::widget::svg::Handle::from_memory(include_bytes!(
+                    "../assets/icons/material/palette.svg"
+                )))
         );
         let path = g
             .texts
@@ -603,8 +624,8 @@ mod grid_tests {
                 .iter()
                 .any(|s| ["Главная", "Рабочий стол"].contains(&s.as_str()))
         );
-        // Три навигационные иконки, одна папка, диск и два нижних действия. Plus/x отсутствуют.
-        assert_eq!(g.icons.iter().filter(|(r, _)| r.x < 230.).count(), 7);
+        // Три навигационные иконки, одна папка, диск и история. Нижняя палитра удалена.
+        assert_eq!(g.icons.iter().filter(|(r, _)| r.x < 210.).count(), 6);
         let r = g.texts.iter().find(|(s, _)| s == "Actual-name").unwrap().1;
         for (point, expected) in [
             (Point::new(r.center_x(), r.center_y()), Some(pinned.clone())),
@@ -929,6 +950,35 @@ mod grid_tests {
             assert!(app.loading.is_none());
             assert!(pin.is_dir());
         }
+        apply(&mut app, Message::Palette);
+        apply(&mut app, Message::PaletteSelect(1));
+        apply(&mut app, Message::PaletteColor(1, "ABCDEF".into()));
+        apply(&mut app, Message::PalettePoint(1, [0.1, 0.9]));
+        apply(&mut app, Message::PaletteIntensity(0.73));
+        apply(&mut app, Message::ClosePalette);
+        let barrier = bg
+            .submit(|_| crate::operations::Completion {
+                outcome: crate::operations::Outcome::Success,
+                completed: None,
+                remaining: None,
+                undo_available: false,
+            })
+            .unwrap()
+            .id;
+        loop {
+            let e = rx.recv_blocking().unwrap();
+            let done = matches!(e,Event::Finished{id,..}if id==barrier);
+            app.apply(e);
+            if done {
+                break;
+            }
+        }
+        let saved = crate::files::settings_load().unwrap();
+        assert_eq!(saved.palette, app.settings.palette);
+        assert_eq!(saved.palette_positions, app.settings.palette_positions);
+        assert_eq!(saved.palette_intensity, 0.73);
+        assert_eq!(app.page, 2);
+        assert!(app.loading.is_none());
         bg.shutdown();
     }
 
@@ -1082,5 +1132,342 @@ mod grid_tests {
         assert!(!app.show_settings && app.show_history);
         let (history, _, _) = inspect(&app, size, &[]);
         assert!(history.labels.iter().any(|label| label == "No history yet"));
+    }
+
+    #[test]
+    fn latest_two_line_names_keep_equal_height_and_extensions() {
+        let (_dir, mut app) = sample(18);
+        let names = [
+            "grid-short",
+            "grid-zapret-discord-youtube-linux",
+            "grid-ОченьДлинноеНазваниеБезПробеловОченьДлинноеНазвание.tar.gz",
+            "grid-e\u{301}e\u{301}e\u{301}👩‍💻👩‍💻👩‍💻longlonglonglong.txt",
+            "grid-строка\nдругая\tстрокаОченьДлинная",
+        ];
+        for (i, e) in app.entries.iter_mut().enumerate() {
+            e.name = names[i % names.len()].into();
+        }
+        for width in [650., 900., 1120.] {
+            app.window_width = width;
+            let (g, _, _) = inspect(&app, Size::new(width, 900.), &[]);
+            let labels: Vec<_> = g
+                .texts
+                .iter()
+                .filter(|(s, _)| s.starts_with("grid-"))
+                .collect();
+            assert_eq!(labels.len(), 18);
+            for (label, r) in &labels {
+                approx(r.height, 32.);
+                assert!(label.lines().count() <= 2, "{label:?}");
+                assert!(!label.contains('\t'));
+                if label.contains("Очень") {
+                    assert!(label.ends_with(".tar.gz"), "{label}");
+                }
+                assert!(
+                    !label.contains("e…"),
+                    "составная графема разрезана: {label}"
+                );
+            }
+            let mut ys: Vec<_> = labels.iter().map(|(_, r)| r.y).collect();
+            ys.sort_by(f32::total_cmp);
+            ys.dedup_by(|a, b| (*a - *b).abs() < 0.1);
+            for pair in ys.windows(2) {
+                approx(pair[1] - pair[0], 122.);
+            }
+        }
+    }
+
+    #[test]
+    fn latest_sidebar_resize_limits_release_and_modal_guards() {
+        let mut app = App::default();
+        app.pointer = Point::new(208., 200.);
+        apply(&mut app, Message::SidebarResizeStart);
+        assert!(app.sidebar_drag_offset.is_some());
+        apply(
+            &mut app,
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: Point::new(308., 200.),
+            })),
+        );
+        approx(app.sidebar_width, 296.);
+        for x in [-300., 2000.] {
+            apply(
+                &mut app,
+                Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                    position: Point::new(x, 200.),
+                })),
+            );
+            assert!((160.0..=480.0).contains(&app.sidebar_width));
+        }
+        for end in [
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
+            iced::Event::Mouse(iced::mouse::Event::CursorLeft),
+            iced::Event::Window(iced::window::Event::Unfocused),
+        ] {
+            app.pointer = Point::new(200., 200.);
+            apply(&mut app, Message::SidebarResizeStart);
+            apply(&mut app, Message::Keyboard(end));
+            assert!(app.sidebar_drag_offset.is_none());
+        }
+        app.show_palette = true;
+        apply(&mut app, Message::SidebarResizeStart);
+        assert!(app.sidebar_drag_offset.is_none());
+        app.show_palette = false;
+        app.window_width = 400.;
+        assert!(sidebar::sidebar_width(&app) <= 136.);
+    }
+
+    #[test]
+    fn latest_palette_points_counts_layouts_and_page_are_preserved() {
+        let mut app = App::default();
+        app.page = 2;
+        let selected = app.directory.join("selection");
+        app.selection.insert(selected);
+        let selection = app.selection.clone();
+        app.settings.palette = [0x112233, 0x445566, 0x778899];
+        apply(&mut app, Message::Palette);
+        apply(&mut app, Message::PaletteSelect(1));
+        apply(&mut app, Message::PaletteCount(2));
+        assert_eq!(app.settings.palette[..2], [0x112233, 0x778899]);
+        apply(&mut app, Message::PaletteCount(1));
+        apply(&mut app, Message::PaletteCount(2));
+        assert_eq!(app.palette_active, 1);
+        apply(&mut app, Message::PalettePoint(1, [-1., 2.]));
+        assert_eq!(app.settings.palette_positions[1], [0., 1.]);
+        let original = app.settings.palette_positions;
+        for _ in 0..4 {
+            apply(&mut app, Message::PaletteCombination);
+        }
+        assert_ne!(app.settings.palette_positions, original);
+        apply(&mut app, Message::PaletteColor(1, "ABCDEF".into()));
+        apply(&mut app, Message::PaletteIntensity(0.8));
+        apply(&mut app, Message::PaletteCommit);
+        assert_eq!(app.page, 2);
+        assert_eq!(app.selection, selection);
+        assert!(app.loading.is_none());
+        let old: crate::files::Settings =
+            serde_json::from_str(r#"{"palette":[1,2,3],"palette_count":2}"#).unwrap();
+        assert_eq!(
+            old.palette_positions,
+            crate::files::Settings::default().palette_positions
+        );
+        let restored: crate::files::Settings =
+            serde_json::from_slice(&serde_json::to_vec(&app.settings).unwrap()).unwrap();
+        assert_eq!(restored.palette_positions, app.settings.palette_positions);
+        assert_eq!(restored.palette_intensity, 0.8);
+    }
+
+    #[test]
+    fn latest_palette_canvas_drag_release_and_unfocus() {
+        use iced::widget::canvas::Program;
+        let settings = crate::files::Settings::default();
+        let field = palette_field::Field {
+            settings: &settings,
+            active: 0,
+            editor: true,
+        };
+        let mut state = palette_field::State::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(330., 300.));
+        let p = Point::new(
+            28. + settings.palette_positions[0][0] * 274.,
+            28. + settings.palette_positions[0][1] * 244.,
+        );
+        let press =
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
+        let a = field
+            .update(
+                &mut state,
+                &press,
+                bounds,
+                iced::mouse::Cursor::Available(p),
+            )
+            .unwrap()
+            .into_inner();
+        assert!(matches!(a.0, Some(Message::PaletteSelect(0))));
+        assert_eq!(a.2, iced::event::Status::Captured);
+        let moved = Point::new(300., 250.);
+        let a = field
+            .update(
+                &mut state,
+                &iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: moved }),
+                bounds,
+                iced::mouse::Cursor::Available(moved),
+            )
+            .unwrap()
+            .into_inner();
+        assert!(matches!(a.0, Some(Message::PalettePoint(0, _))));
+        let release = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ));
+        let a = field
+            .update(
+                &mut state,
+                &release,
+                bounds,
+                iced::mouse::Cursor::Available(moved),
+            )
+            .unwrap()
+            .into_inner();
+        assert!(matches!(a.0, Some(Message::PaletteCommit)));
+        assert_ne!(
+            field.mouse_interaction(&state, bounds, iced::mouse::Cursor::Unavailable),
+            iced::mouse::Interaction::Grabbing
+        );
+        field.update(
+            &mut state,
+            &press,
+            bounds,
+            iced::mouse::Cursor::Available(p),
+        );
+        field.update(
+            &mut state,
+            &iced::Event::Window(iced::window::Event::Unfocused),
+            bounds,
+            iced::mouse::Cursor::Unavailable,
+        );
+        assert_ne!(
+            field.mouse_interaction(&state, bounds, iced::mouse::Cursor::Unavailable),
+            iced::mouse::Interaction::Grabbing,
+            "после потери фокуса жест должен завершаться"
+        );
+    }
+
+    #[test]
+    fn latest_context_palette_action_and_path_editor_without_go() {
+        let (_dir, mut app) = sample(1);
+        let size = Size::new(1120., 760.);
+        app.pointer = Point::new(40., 300.);
+        apply(&mut app, Message::SidebarContext(None));
+        let (g, _, _) = inspect(&app, size, &[]);
+        let change = g
+            .texts
+            .iter()
+            .find(|(s, _)| s == "Change colors")
+            .unwrap()
+            .1;
+        let p = Point::new(change.center_x(), change.center_y());
+        let (_, _, msgs) = inspect(
+            &app,
+            size,
+            &[
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+            ],
+        );
+        for message in msgs {
+            apply(&mut app, message);
+        }
+        assert!(app.show_palette);
+        assert!(app.context_menu.is_none());
+        let (g, _, _) = inspect(&app, size, &[]);
+        for text in [
+            "Appearance colors",
+            "Color intensity",
+            "Reset colors",
+            "Light",
+            "Dark",
+            "Scattered",
+        ] {
+            assert!(!g.labels.iter().any(|s| s == text));
+        }
+        apply(&mut app, Message::ClosePalette);
+        apply(&mut app, Message::EditPath);
+        let (g, _, _) = inspect(&app, size, &[]);
+        assert!(!g.labels.iter().any(|s| s == "Go"));
+        assert!(g.labels.iter().any(|s| s == "Copy full path"));
+        let r = g.inputs[0];
+        let p = Point::new(r.center_x(), r.center_y());
+        let key = iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+            modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+            physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::Enter),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::default(),
+            text: None,
+            repeat: false,
+        });
+        let (_, _, msgs) = inspect(
+            &app,
+            size,
+            &[
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+                (key, p),
+            ],
+        );
+        assert!(
+            msgs.iter().any(|m| matches!(m, Message::Go)),
+            "Enter в поле пути: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn latest_resize_subscription_delivers_captured_and_ignored_events() {
+        use iced::futures::{StreamExt, executor::block_on, stream};
+        use iced_futures::subscription::{Event as Input, into_recipes};
+        let app = App::default();
+        let recipe = into_recipes(subscription(&app)).into_iter().nth(1).unwrap();
+        let mut inputs = Vec::new();
+        for status in [iced::event::Status::Captured, iced::event::Status::Ignored] {
+            for event in [
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )),
+                iced::Event::Mouse(iced::mouse::Event::CursorLeft),
+                iced::Event::Window(iced::window::Event::Unfocused),
+                iced::Event::Window(iced::window::Event::Resized(Size::new(600., 500.))),
+            ] {
+                inputs.push(Input::Interaction {
+                    window: iced::window::Id::unique(),
+                    event,
+                    status,
+                });
+            }
+        }
+        let result: Vec<_> = block_on(recipe.stream(Box::pin(stream::iter(inputs))).collect());
+        assert_eq!(result.len(), 8);
+        assert!(result.iter().all(|m| matches!(m, Message::Keyboard(_))));
+    }
+    #[test]
+    fn latest_file_hover_does_not_create_name_tooltip() {
+        let (_dir, app) = sample(1);
+        let size = Size::new(1120., 760.);
+        let (g, _, _) = inspect(&app, size, &[]);
+        let r = g.names[0].1;
+        let p = Point::new(r.center_x(), r.center_y());
+        let (g, _, _) = inspect(
+            &app,
+            size,
+            &[(
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: p }),
+                p,
+            )],
+        );
+        assert!(
+            !g.has_overlay,
+            "наведение на имя файла не должно создавать tooltip overlay"
+        );
     }
 }
