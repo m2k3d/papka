@@ -30,17 +30,17 @@ pub(super) fn show<'a>(
         let editor = container(
             column![
                 row![
-                    text("Текущий путь").size(20).width(Fill),
+                    text("Current path").size(20).width(Fill),
                     action("×", Message::ClosePath, true)
                 ],
-                text_input("Путь к папке", &app.path_input)
+                text_input("Directory path", &app.path_input)
                     .id("path")
                     .on_input(Message::Path)
                     .on_submit(Message::Go)
                     .padding(12),
                 row![
-                    action("Копировать полный путь", Message::CopyPath, true),
-                    action("Перейти", Message::Go, true)
+                    action("Copy full path", Message::CopyPath, true),
+                    action("Go", Message::Go, true)
                 ]
                 .spacing(8)
                 .wrap(),

@@ -38,11 +38,11 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
         Command::Undo(_) | Command::Acknowledge(_) => unreachable!(),
     };
     if pairs.is_empty() {
-        return Err(io::Error::other("Ничего не выделено."));
+        return Err(io::Error::other("Nothing selected."));
     }
     if pairs.len() > 100 {
         return Err(io::Error::other(
-            "Выберите не более 100 элементов за одну операцию.",
+            "Select no more than 100 items per operation.",
         ));
     }
     let mut cp = Checkpoint {
@@ -55,7 +55,7 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!(
-                    "Уже существует: {}. Выберите другое имя или расположение.",
+                    "Already exists: {}. Choose another name or location.",
                     target.display()
                 ),
             ));
@@ -64,10 +64,10 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
             let metadata = fs::symlink_metadata(&source)?;
             let parent = target
                 .parent()
-                .ok_or_else(|| io::Error::other("Нет родительского каталога"))?;
+                .ok_or_else(|| io::Error::other("No parent directory"))?;
             let canonical_parent = fs::canonicalize(parent)?;
             if metadata.is_dir() && canonical_parent.starts_with(fs::canonicalize(&source)?) {
-                return Err(io::Error::other("Нельзя поместить папку внутрь неё самой."));
+                return Err(io::Error::other("Cannot place a folder inside itself."));
             }
             let mut preview = Vec::new();
             collect(&source, &mut preview, ctx)?;
@@ -101,14 +101,14 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
 
 fn targets(paths: Vec<PathBuf>, directory: PathBuf) -> io::Result<Vec<(PathBuf, PathBuf)>> {
     if !directory.is_dir() {
-        return Err(io::Error::other("Папка назначения недоступна."));
+        return Err(io::Error::other("Destination folder is unavailable."));
     }
     paths
         .into_iter()
         .map(|p| {
             let name = p
                 .file_name()
-                .ok_or_else(|| io::Error::other("Нельзя перемещать корень файловой системы."))?;
+                .ok_or_else(|| io::Error::other("Cannot move the filesystem root."))?;
             let target = directory.join(name);
             Ok((p, target))
         })

@@ -19,7 +19,7 @@ impl Engine {
             .iter()
             .find(|r| r.id == id)
             .cloned()
-            .ok_or_else(|| io::Error::other("Действие отсутствует в истории."))?;
+            .ok_or_else(|| io::Error::other("Action not found in history."))?;
         let mut cp: Checkpoint = serde_json::from_slice(&record.checkpoint)?;
         verify_undo(&record, &cp, ctx)?;
         cp.undoing = true;
@@ -31,7 +31,7 @@ impl Engine {
             if ctx.is_cancelled() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
-                    "Отмена прервана. Требуется ручная проверка истории.",
+                    "Undo interrupted. Review the history manually.",
                 ));
             }
             unchanged(&cp.items[index].nodes, ctx)?;
@@ -77,7 +77,7 @@ impl Engine {
             !item.done && item.started && fs::symlink_metadata(item.target.path()).is_ok()
         }) {
             return Err(io::Error::other(
-                "Подтверждённые результаты отменены. Незавершённые элементы требуют ручной проверки.",
+                "Confirmed results undone. Incomplete items require manual review.",
             ));
         }
         Ok(())
@@ -88,17 +88,17 @@ impl Engine {
 fn verify_undo(record: &Record, cp: &Checkpoint, ctx: &Context) -> io::Result<()> {
     if cp.version != 1 || record.finished.is_none() || cp.undoing {
         return Err(io::Error::other(
-            "Незавершённое действие требует ручной проверки. Автоматическое восстановление запрещено.",
+            "Incomplete action requires manual review. Automatic recovery is disabled.",
         ));
     }
     if !cp.items.iter().any(|i| i.done && !i.undone) {
-        return Err(io::Error::other("Нет доступных результатов для отмены."));
+        return Err(io::Error::other("No results available to undo."));
     }
     // Проверить все результаты до первого изменения.
     for item in cp.items.iter().filter(|i| i.done && !i.undone) {
         if item.nodes.is_empty() {
             return Err(io::Error::other(
-                "Нет подтверждённых данных для безопасной отмены.",
+                "No confirmed data for a safe undo.",
             ));
         }
         unchanged(&item.nodes, ctx)?;
@@ -109,7 +109,7 @@ fn verify_undo(record: &Record, cp: &Checkpoint, ctx: &Context) -> io::Result<()
             && fs::symlink_metadata(item.source.path()).is_ok()
         {
             return Err(io::Error::other(
-                "Исходное имя занято. Освободите его перед отменой.",
+                "The original name is in use. Free it before undoing.",
             ));
         }
     }

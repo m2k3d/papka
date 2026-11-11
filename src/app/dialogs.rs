@@ -67,7 +67,7 @@ impl App {
         let command = match dialog {
             Dialog::Create(directory) => {
                 if !valid_name(name) {
-                    self.error = Some("Введите имя без /, отличное от . и ..".into());
+                    self.error = Some("Enter a name without /, other than . or ..".into());
                     return;
                 }
                 Command::Create(
@@ -81,14 +81,14 @@ impl App {
             }
             Dialog::Rename(path) => {
                 if !valid_name(name) {
-                    self.error = Some("Введите имя без /, отличное от . и ..".into());
+                    self.error = Some("Enter a name without /, other than . or ..".into());
                     return;
                 }
                 Command::Rename(path.clone(), path.with_file_name(name))
             }
             Dialog::Transfer(moving) => {
                 if name.is_empty() {
-                    self.error = Some("Введите папку назначения.".into());
+                    self.error = Some("Enter a destination directory.".into());
                     return;
                 }
                 let target = PathBuf::from(name);

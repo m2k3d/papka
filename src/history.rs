@@ -73,13 +73,13 @@ impl Journal {
         }
         let lock = options.open(directory.join("history.lock"))?;
         lock.try_lock().map_err(|_| io::Error::new(io::ErrorKind::WouldBlock,
-            "Журнал недоступен для блокировки; возможно, открыт другим экземпляром papka."))?;
+            "Could not lock the history; another instance of papka may be using it."))?;
         let document = match File::open(directory.join("history.json")) {
             Ok(file) => {
                 let mut bytes = Vec::new();
                 file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
-                if bytes.len() as u64 > MAX_FILE_BYTES { return Err(invalid("Журнал превышает допустимый размер.")); }
-                serde_json::from_slice(&bytes).map_err(|_| invalid("Повреждён или неизвестен формат журнала."))?
+                if bytes.len() as u64 > MAX_FILE_BYTES { return Err(invalid("History exceeds the size limit.")); }
+                serde_json::from_slice(&bytes).map_err(|_| invalid("History format is corrupted or unknown."))?
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Document {
                 version: 1, next_id: 1, records: Vec::new(),
@@ -108,11 +108,11 @@ impl Journal {
     /// Сначала надёжно записать намерение, затем выполнять файловое действие.
     pub fn begin(&mut self, action: Action, checkpoint: Vec<u8>, now: u64) -> io::Result<u64> {
         if self.document.records.iter().filter(|record| record.finished.is_none()).count() >= MAX_PENDING {
-            return Err(invalid("Слишком много незавершённых записей; требуется разбор истории."));
+            return Err(invalid("Too many incomplete records; review the history."));
         }
         let mut next = self.document.clone();
         let id = next.next_id;
-        next.next_id = id.checked_add(1).ok_or_else(|| invalid("Исчерпаны идентификаторы истории."))?;
+        next.next_id = id.checked_add(1).ok_or_else(|| invalid("History IDs exhausted."))?;
         next.records.push(Record { id, action, started_at: now, finished: None, checkpoint });
         prune(&mut next, now);
         self.commit(next)?;
@@ -139,16 +139,16 @@ impl Journal {
     pub fn update_record(&mut self, id: u64, checkpoint: Vec<u8>) -> io::Result<()> {
         let mut next = self.document.clone();
         let record = next.records.iter_mut().find(|record| record.id == id)
-            .ok_or_else(|| invalid("Запись истории не найдена."))?;
+            .ok_or_else(|| invalid("History record not found."))?;
         record.checkpoint = checkpoint;
         self.commit(next)
     }
 
     fn commit(&mut self, next: Document) -> io::Result<()> {
-        if !self.writable { return Err(invalid("Состояние записи не подтверждено; переоткройте журнал.")); }
+        if !self.writable { return Err(invalid("Record state is unconfirmed; reopen the history.")); }
         validate(&next)?;
-        let bytes = serde_json::to_vec(&next).map_err(|_| invalid("Не удалось сериализовать журнал."))?;
-        if bytes.len() as u64 > MAX_FILE_BYTES { return Err(invalid("Журнал превышает допустимый размер.")); }
+        let bytes = serde_json::to_vec(&next).map_err(|_| invalid("Could not serialize the history."))?;
+        if bytes.len() as u64 > MAX_FILE_BYTES { return Err(invalid("History exceeds the size limit.")); }
         let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
         temporary.write_all(&bytes)?;
         temporary.as_file().sync_all()?;
@@ -166,7 +166,7 @@ impl Journal {
 
 fn pending(document: &mut Document, id: u64) -> io::Result<&mut Record> {
     document.records.iter_mut().find(|record| record.id == id && record.finished.is_none())
-        .ok_or_else(|| invalid("Незавершённая запись истории не найдена."))
+        .ok_or_else(|| invalid("Incomplete history record not found."))
 }
 
 fn prune(document: &mut Document, now: u64) {
@@ -182,14 +182,14 @@ fn prune(document: &mut Document, now: u64) {
 
 fn validate(document: &Document) -> io::Result<()> {
     if document.version != 1 || document.next_id == 0 {
-        return Err(invalid("Версия или идентификатор журнала не поддерживается."));
+        return Err(invalid("History version or ID is not supported."));
     }
     let mut ids = std::collections::BTreeSet::new();
     for record in &document.records {
         if record.id == 0 || record.id >= document.next_id || !ids.insert(record.id)
             || record.checkpoint.len() > MAX_CHECKPOINT_BYTES
             || record.finished.as_ref().is_some_and(|finished| finished.at < record.started_at) {
-            return Err(invalid("Некорректная запись журнала; файл не изменён."));
+            return Err(invalid("Invalid history record; the file was not changed."));
         }
     }
     Ok(())

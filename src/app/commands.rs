@@ -14,7 +14,7 @@ impl App {
             match files::settings_load() {
                 Ok(settings) => ctx.data(Data::Settings(settings)),
                 Err(e) => ctx.data(Data::Warning(format!(
-                    "Не удалось загрузить настройки: {e}"
+                    "Could not load settings: {e}"
                 ))),
             }
             completion(engine.lock().unwrap_or_else(|e| e.into_inner()).load(ctx))
@@ -48,11 +48,11 @@ impl App {
             return;
         }
         if self.conflict.is_some() {
-            self.error = Some("Сначала выберите действие для конфликта имён.".into());
+            self.error = Some("Choose how to resolve the name conflict first.".into());
             return;
         }
         if self.mutation.is_some() {
-            self.error = Some("Дождитесь завершения текущей операции.".into());
+            self.error = Some("Wait for the current operation to finish.".into());
             return;
         }
         let Some(background) = &self.background else {
@@ -70,7 +70,7 @@ impl App {
                 self.error = None;
                 self.conflict = None;
                 self.operation_notice = None;
-                self.status = "Выполняется…".into();
+                self.status = "Working…".into();
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -98,7 +98,7 @@ impl App {
     pub fn stop(&mut self) {
         if let Some(ticket) = &self.mutation {
             ticket.cancellation.request();
-            self.status = "Запрошено прерывание…".into();
+            self.status = "Stopping…".into();
         }
     }
 
@@ -106,7 +106,7 @@ impl App {
         self.closing = true;
         if let Some(ticket) = &self.mutation {
             ticket.cancellation.request();
-            self.status = "Завершение операции перед закрытием…".into();
+            self.status = "Finishing the operation before closing…".into();
         }
     }
 }

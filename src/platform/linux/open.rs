@@ -11,7 +11,7 @@ pub fn open_file(path: &std::path::Path) -> std::io::Result<()> {
         Ok(())
     } else {
         Err(std::io::Error::other(
-            "Не удалось открыть файл стандартным приложением.",
+            "Could not open the file with the default application.",
         ))
     }
 }

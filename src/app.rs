@@ -79,7 +79,7 @@ impl Default for App {
             work: WorkState::default(),
             background: None,
             error: None,
-            status: "Запуск…".into(),
+            status: "Starting…".into(),
             operation_notice: None,
             path_input: directory.to_string_lossy().into_owned(),
             path_dirty: false,

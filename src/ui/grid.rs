@@ -18,17 +18,22 @@ pub(super) fn file_grid<'a>(
     page: usize,
 ) -> Element<'a, Message> {
     let grid = iced::widget::responsive(move |bounds| {
-        let gap = 12.0;
-        let columns = ((bounds.width + gap) / (132.0 + gap)).floor().max(1.0) as usize;
-        let mut rows = column![].spacing(14).width(Fill);
+        let gap = 6.0;
+        // Добавляем колонку до того, как карточки станут шире компактного размера.
+        let columns = ((bounds.width + gap) / (124.0 + gap)).ceil().max(1.0) as usize;
+        // В узком окне оставляем место для иконки и внутренних отступов.
+        let columns = columns.min(((bounds.width + gap) / (92.0 + gap)).floor().max(1.0) as usize);
+        // Распределяем всю доступную ширину поровну, включая неполный ряд.
+        let card_width = ((bounds.width - gap * (columns - 1) as f32) / columns as f32).max(0.0);
+        let mut rows = column![].spacing(6).width(Fill);
         let mut cards = row![].spacing(gap).width(Fill);
         if visible.is_empty() {
             cards = cards.push(
                 container(
                     text(if app.loading.is_some() {
-                        "Чтение каталога…"
+                        "Reading directory…"
                     } else {
-                        "Папка пуста"
+                        "This folder is empty"
                     })
                     .size(16),
                 )
@@ -41,7 +46,7 @@ pub(super) fn file_grid<'a>(
             let selected = app.selection.contains(&entry.path);
             let icon = file_icon(entry.directory, entry.link);
             let card = column![
-                container(icon).center_x(Fill).height(60),
+                container(icon).center_x(Fill).height(68),
                 text(&entry.name)
                     .size(13)
                     .width(Fill)
@@ -57,13 +62,13 @@ pub(super) fn file_grid<'a>(
                         theme(app.settings.dark).palette().text.scale_alpha(opacity)
                     }),
             ]
-            .spacing(8)
+            .spacing(4)
             .align_x(iced::Center);
             cards = cards.push(
                 mouse_area(
                     button(card)
-                        .width(Fill)
-                        .padding(12)
+                        .width(card_width)
+                        .padding(6)
                         .style(move |theme: &Theme, status| {
                             let mut style = button::text(theme, status);
                             style.border.radius = 12.into();
@@ -87,7 +92,7 @@ pub(super) fn file_grid<'a>(
         } else if count % columns != 0 {
             // Неполный ряд сохраняет ширину столбцов остальных рядов.
             for _ in count % columns..columns {
-                cards = cards.push(space().width(Fill));
+                cards = cards.push(space().width(card_width));
             }
             rows = rows.push(cards);
         }
@@ -107,13 +112,13 @@ pub(super) fn file_grid<'a>(
 pub(super) fn footer(app: &App, ready: bool, page: usize, pages: usize) -> Element<'_, Message> {
     let mut footer = row![
         text(if app.loading.is_some() {
-            "Обновление…"
+            "Refreshing…"
         } else {
             app.operation_notice.as_deref().unwrap_or(&app.status)
         })
         .size(13)
         .width(Fill),
-        text(format!("Выделено: {}", app.selection.len())).size(13)
+        text(format!("Selected: {}", app.selection.len())).size(13)
     ]
     .spacing(12)
     .align_y(iced::Center);
@@ -124,7 +129,7 @@ pub(super) fn footer(app: &App, ready: bool, page: usize, pages: usize) -> Eleme
             .push(action("›", Message::Page(true), page + 1 < pages));
     }
     if !ready {
-        footer = footer.push(action("Прервать", Message::Stop, true));
+        footer = footer.push(action("Stop", Message::Stop, true));
     }
     footer.into()
 }

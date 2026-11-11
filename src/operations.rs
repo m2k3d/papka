@@ -90,9 +90,9 @@ pub enum SubmitError { QueueFull, Stopped, IdExhausted }
 impl std::fmt::Display for SubmitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::QueueFull => "Очередь операций заполнена.",
-            Self::Stopped => "Фоновое выполнение остановлено.",
-            Self::IdExhausted => "Исчерпаны идентификаторы операций.",
+            Self::QueueFull => "Operation queue is full.",
+            Self::Stopped => "Background processing has stopped.",
+            Self::IdExhausted => "Operation IDs exhausted.",
         })
     }
 }
@@ -202,7 +202,7 @@ fn spawn_worker(name: &str, jobs: Receiver<Job>, events: Sender<Event>, shutdown
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (job.work)(&mut context))) {
                     Ok(completion) => completion,
                     Err(_) => Completion {
-                        outcome: Outcome::Failed("Сбой фонового задания; результат требует проверки.".into()),
+                        outcome: Outcome::Failed("Background task failed; review the result.".into()),
                         completed: None, remaining: None, undo_available: false,
                     },
                 }

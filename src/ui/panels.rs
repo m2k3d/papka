@@ -19,7 +19,7 @@ pub(super) fn notices<'a>(
             container(
                 row![
                     text(error).size(14).width(Fill),
-                    action("Закрыть", Message::ClearError, true)
+                    action("Close", Message::ClearError, true)
                 ]
                 .spacing(12),
             )
@@ -30,13 +30,13 @@ pub(super) fn notices<'a>(
     if app.conflict.is_some() {
         content = content.push(
             row![
-                text("Имя занято. Как продолжить?").size(14),
+                text("This name is already in use. How would you like to proceed?").size(14),
                 action(
-                    "Изменить имя / папку назначения",
+                    "Change name / destination",
                     Message::ResolveConflict,
                     ready
                 ),
-                action("Оставить как есть", Message::ClearError, true)
+                action("Leave unchanged", Message::ClearError, true)
             ]
             .spacing(12),
         );
@@ -51,24 +51,24 @@ pub(super) fn operation_dialog<'a>(
 ) -> Column<'a, Message> {
     if let Some(dialog) = &app.dialog {
         let title = match dialog {
-            Dialog::Create(true) => "Новая папка",
-            Dialog::Create(false) => "Новый файл",
-            Dialog::Rename(_) => "Новое имя",
-            Dialog::Transfer(true) => "Переместить в папку",
-            Dialog::Transfer(false) => "Копировать в папку",
+            Dialog::Create(true) => "New folder",
+            Dialog::Create(false) => "New file",
+            Dialog::Rename(_) => "New name",
+            Dialog::Transfer(true) => "Move to folder",
+            Dialog::Transfer(false) => "Copy to folder",
         };
         content = content.push(
             container(
                 column![
                     text(title).size(20),
                     row![
-                        text_input("Имя или путь", &app.input)
+                        text_input("Name or path", &app.input)
                             .id("operation-input")
                             .on_input(Message::Input)
                             .on_submit(Message::Confirm)
                             .padding(10),
-                        action("Выполнить", Message::Confirm, ready),
-                        action("Отмена", Message::Dismiss, true)
+                        action("Confirm", Message::Confirm, ready),
+                        action("Cancel", Message::Dismiss, true)
                     ]
                     .spacing(8)
                 ]
@@ -84,30 +84,30 @@ pub(super) fn operation_dialog<'a>(
 pub(super) fn settings(app: &App) -> Element<'_, Message> {
     container(
         column![
-            text("Настройки").size(22),
+            text("Settings").size(22),
             checkbox(app.settings.hidden)
-                .label("Показывать скрытые файлы")
+                .label("Show hidden files")
                 .on_toggle(Message::Hidden),
             checkbox(app.settings.dark)
-                .label("Тёмная тема")
+                .label("Dark theme")
                 .on_toggle(Message::Dark),
             checkbox(app.settings.reduced_motion)
-                .label("Уменьшить движение")
+                .label("Reduce motion")
                 .on_toggle(Message::Reduced),
             row![
-                text("Сортировка"),
+                text("Sort by"),
                 pick_list(
                     [Sort::Name, Sort::Size, Sort::Modified],
                     Some(app.settings.sort),
                     Message::Sort
                 ),
                 checkbox(app.settings.descending)
-                    .label("В обратном порядке")
+                    .label("Reverse order")
                     .on_toggle(Message::Descending)
             ]
             .spacing(16)
             .align_y(iced::Center),
-            text("Папки показываются первыми. Ctrl / Shift — множественное выделение. F2 — имя, F5 — обновить. Alt + стрелки — переходы.").size(13),
+            text("Folders appear first. Ctrl / Shift: select multiple items. F2: rename. F5: refresh. Alt + arrows: navigate.").size(13),
         ]
         .spacing(16),
     )
@@ -118,9 +118,9 @@ pub(super) fn settings(app: &App) -> Element<'_, Message> {
 
 pub(super) fn history(app: &App, idle: bool) -> Element<'_, Message> {
     let mut history = column![
-        text("История · до 100 действий за 30 дней").size(22),
+        text("History · up to 100 actions over 30 days").size(22),
         text(
-            "После сбоя незавершённые действия не повторяются. Отмена проверяет сохранность данных."
+            "Incomplete actions are not retried after a crash. Undo checks that your data is unchanged."
         )
         .size(13)
     ]
@@ -130,7 +130,7 @@ pub(super) fn history(app: &App, idle: bool) -> Element<'_, Message> {
             row![
                 text(&record.label).size(14).width(Fill),
                 action(
-                    "Отменить действие",
+                    "Undo action",
                     Message::Undo(record.id),
                     idle && record.undo_available
                 )
@@ -139,12 +139,12 @@ pub(super) fn history(app: &App, idle: bool) -> Element<'_, Message> {
         );
         if record.pending {
             history = history.push(action(
-                "Проверено вручную · закрыть запись",
+                "Reviewed manually · close record",
                 Message::Acknowledge(record.id),
                 idle,
             ));
         }
-        history = history.push(action("Пути и сведения", Message::Details(record.id), true));
+        history = history.push(action("Paths and details", Message::Details(record.id), true));
         if app.expanded_history == Some(record.id) {
             for detail in &record.details {
                 history = history.push(text(detail).size(12));
@@ -152,7 +152,7 @@ pub(super) fn history(app: &App, idle: bool) -> Element<'_, Message> {
         }
     }
     if app.history.is_empty() {
-        history = history.push(text("История пока пуста"));
+        history = history.push(text("No history yet"));
     }
     scrollable(container(history).padding(16))
         .height(Length::Fixed(200.))

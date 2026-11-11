@@ -39,7 +39,11 @@ pub fn run() -> iced::Result {
     iced::application(App::default, update, view)
         .title("papka")
         .window_size((1120., 760.))
-        .default_font(iced::Font::with_name("DejaVu Sans"))
+        .font(
+            include_bytes!("../assets/fonts/caskaydia-cove/CaskaydiaCoveNerdFont-Regular.ttf")
+                .as_slice(),
+        )
+        .default_font(iced::Font::with_name("CaskaydiaCove Nerd Font"))
         .exit_on_close_request(false)
         .theme(|app: &App| theme(app.settings.dark))
         .subscription(subscription)

@@ -54,7 +54,7 @@ fn background_events() -> impl Stream<Item = Message> {
         Err(_) => {
             let _ = output
                 .send(Message::Failed(
-                    "Не удалось запустить фоновые задачи.".into(),
+                    "Could not start background tasks.".into(),
                 ))
                 .await;
         }

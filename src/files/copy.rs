@@ -17,12 +17,12 @@ pub(super) fn copy_tree(
     depth: usize,
 ) -> io::Result<()> {
     if depth > 256 {
-        return Err(io::Error::other("Слишком глубокое дерево каталогов."));
+        return Err(io::Error::other("Directory tree is too deep."));
     }
     if ctx.is_cancelled() {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "Копирование прервано; часть данных могла быть скопирована.",
+            "Copy interrupted; some data may have been copied.",
         ));
     }
     let before = stamp(source)?;
@@ -57,7 +57,7 @@ pub(super) fn copy_tree(
             if ctx.is_cancelled() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
-                    "Копирование прервано; частичный файл сохранён.",
+                    "Copy interrupted; partial file preserved.",
                 ));
             }
             let n = input.read(&mut buffer)?;
@@ -80,14 +80,14 @@ pub(super) fn copy_tree(
         output.sync_all()?;
     } else {
         return Err(io::Error::other(
-            "Копирование специальных файлов не поддерживается.",
+            "Copying special files is not supported.",
         ));
     }
     sync_parent(target)?;
     checkpoint(1, 0)?;
     if stamp(source)? != before {
         return Err(io::Error::other(
-            "Источник изменился во время копирования. Копия требует проверки.",
+            "Source changed during copying. Review the copy.",
         ));
     }
     Ok(())

@@ -94,7 +94,7 @@ pub(super) fn theme(dark: bool) -> Theme {
     });
     static DARK: LazyLock<Theme> = LazyLock::new(|| {
         Theme::custom(
-            "papka · тёмная",
+            "papka · dark",
             iced::theme::Palette {
                 background: iced::color!(0x202127),
                 text: iced::color!(0xe7e7ee),

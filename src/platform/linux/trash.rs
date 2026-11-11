@@ -7,15 +7,15 @@ pub fn trash_directory(source: &std::path::Path) -> std::io::Result<PathBuf> {
     // Для ссылки выбирается файловая система самой ссылки, а не её цели.
     let parent = source
         .parent()
-        .ok_or_else(|| std::io::Error::other("Нельзя удалить корень файловой системы."))?;
+        .ok_or_else(|| std::io::Error::other("Cannot trash the filesystem root."))?;
     let parent = std::fs::canonicalize(parent)?;
     let device = std::fs::metadata(&parent)?.dev();
-    let home = dirs::data_dir().ok_or_else(|| std::io::Error::other("Не определена корзина."))?;
+    let home = dirs::data_dir().ok_or_else(|| std::io::Error::other("Could not locate the trash."))?;
     let mut home_ancestor = home.as_path();
     while !home_ancestor.exists() {
         home_ancestor = home_ancestor
             .parent()
-            .ok_or_else(|| std::io::Error::other("Не определена корзина."))?;
+            .ok_or_else(|| std::io::Error::other("Could not locate the trash."))?;
     }
     let uid = unsafe { libc::geteuid() };
     let root = if std::fs::metadata(home_ancestor)?.dev() == device {
@@ -32,7 +32,7 @@ pub fn trash_directory(source: &std::path::Path) -> std::io::Result<PathBuf> {
     };
     if source.starts_with(&root) {
         return Err(std::io::Error::other(
-            "Нельзя повторно отправить содержимое корзины в неё же.",
+            "Cannot move trash contents into the trash again.",
         ));
     }
     for path in [&root, &root.join("files"), &root.join("info")] {
@@ -41,7 +41,7 @@ pub fn trash_directory(source: &std::path::Path) -> std::io::Result<PathBuf> {
         let m = std::fs::symlink_metadata(path)?;
         if !m.is_dir() || m.is_symlink() || m.uid() != uid || m.mode() & 0o077 != 0 {
             return Err(std::io::Error::other(
-                "Небезопасный каталог корзины. Удаление отменено.",
+                "Unsafe trash directory. Nothing was trashed.",
             ));
         }
     }
@@ -60,10 +60,10 @@ pub fn trash_info_path(target: &std::path::Path) -> std::io::Result<PathBuf> {
     let root = target
         .parent()
         .and_then(|p| p.parent())
-        .ok_or_else(|| std::io::Error::other("Не определена корзина."))?;
+        .ok_or_else(|| std::io::Error::other("Could not locate the trash."))?;
     let mut name = target
         .file_name()
-        .ok_or_else(|| std::io::Error::other("Нет имени файла."))?
+        .ok_or_else(|| std::io::Error::other("No file name."))?
         .to_os_string();
     name.push(".trashinfo");
     Ok(root.join("info").join(name))
@@ -77,7 +77,7 @@ pub fn write_trash_info(source: &std::path::Path, info: &std::path::Path) -> std
     let root = info
         .parent()
         .and_then(|p| p.parent())
-        .ok_or_else(|| std::io::Error::other("Некорректный путь корзины."))?;
+        .ok_or_else(|| std::io::Error::other("Invalid trash path."))?;
     let stored = if root
         .file_name()
         .is_some_and(|n| n.as_bytes().starts_with(b".Trash-"))
@@ -85,7 +85,7 @@ pub fn write_trash_info(source: &std::path::Path, info: &std::path::Path) -> std
         source
             .strip_prefix(
                 root.parent()
-                    .ok_or_else(|| std::io::Error::other("Не определён том корзины."))?,
+                    .ok_or_else(|| std::io::Error::other("Could not determine the trash volume."))?,
             )
             .map_err(std::io::Error::other)?
     } else {
@@ -105,7 +105,7 @@ pub fn write_trash_info(source: &std::path::Path, info: &std::path::Path) -> std
     let mut time: libc::tm = unsafe { std::mem::zeroed() };
     if unsafe { libc::localtime_r(&seconds, &mut time) }.is_null() {
         return Err(std::io::Error::other(
-            "Не удалось определить дату удаления.",
+            "Could not determine the deletion date.",
         ));
     }
     let date = format!(

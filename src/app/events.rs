@@ -66,8 +66,8 @@ impl App {
             } => {
                 if self.mutation.as_ref().is_some_and(|t| t.id == id) {
                     self.status = total.map_or_else(
-                        || format!("Записано: {:.1} МиБ", completed as f64 / 1_048_576.),
-                        |total| format!("Обработано: {completed} / {total}"),
+                        || format!("Written: {:.1} MiB", completed as f64 / 1_048_576.),
+                        |total| format!("Processed: {completed} / {total}"),
                     );
                 }
             }
@@ -96,7 +96,7 @@ impl App {
         let counts = completion
             .completed
             .zip(completion.remaining)
-            .map(|(done, left)| format!("Обработано: {done}; осталось: {left}. "))
+            .map(|(done, left)| format!("Processed: {done}; remaining: {left}. "))
             .unwrap_or_default();
         let succeeded = matches!(&completion.outcome, Outcome::Success);
         match completion.outcome {
@@ -108,13 +108,13 @@ impl App {
                 }
                 self.error = Some(error);
                 self.status =
-                    format!("{counts}Операция не завершена полностью. Проверьте историю.");
+                    format!("{counts}Operation is incomplete. Check the history.");
             }
             Outcome::Interrupted if mutation => {
-                self.status = format!("{counts}Прерывание завершено. Проверьте историю.")
+                self.status = format!("{counts}Operation stopped. Check the history.")
             }
             Outcome::Success if mutation => {
-                self.status = format!("Элементов: {}", self.entries.len());
+                self.status = format!("Items: {}", self.entries.len());
                 self.operation_notice = None;
             }
             Outcome::Success if read && self.navigation.read_error => {

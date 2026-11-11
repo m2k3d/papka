@@ -11,8 +11,8 @@ pub(super) fn view(app: &App) -> Element<'_, Message> {
         .directory
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Файловая система".into());
-    let mut content = column![text(title).size(20), horizontal_rule(1)].spacing(18);
+        .unwrap_or_else(|| "Filesystem".into());
+    let mut content = column![text(title).size(20), horizontal_rule(1)].spacing(12);
     content = panels::notices(app, ready, content);
     content = panels::operation_dialog(app, ready, content);
     if app.show_settings {
@@ -31,10 +31,10 @@ pub(super) fn view(app: &App) -> Element<'_, Message> {
     let surface = mouse_area(
         container(content)
             .padding(iced::Padding {
-                top: 24.0,
-                right: 24.0,
-                bottom: 16.0,
-                left: 24.0,
+                top: 18.0,
+                right: 18.0,
+                bottom: 12.0,
+                left: 18.0,
             })
             .width(Fill)
             .height(Fill)

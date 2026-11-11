@@ -13,11 +13,11 @@ use iced::{Element, Fill};
 pub(super) fn palette_editor(app: &App) -> Element<'_, Message> {
     let mut editor = column![
         row![
-            text("Цвета оформления").size(20).width(Fill),
+            text("Appearance colors").size(20).width(Fill),
             action("×", Message::ClosePalette, true)
         ]
         .align_y(iced::Center),
-        text("Один цвет или плавный градиент").size(12),
+        text("Solid color or smooth gradient").size(12),
         container(space())
             .height(64)
             .width(Fill)
@@ -30,9 +30,9 @@ pub(super) fn palette_editor(app: &App) -> Element<'_, Message> {
                 ..Default::default()
             }),
         row![
-            action("1 цвет", Message::PaletteCount(1), true),
-            action("2 цвета", Message::PaletteCount(2), true),
-            action("3 цвета", Message::PaletteCount(3), true)
+            action("1 color", Message::PaletteCount(1), true),
+            action("2 colors", Message::PaletteCount(2), true),
+            action("3 colors", Message::PaletteCount(3), true)
         ]
         .spacing(4)
     ]
@@ -73,7 +73,7 @@ pub(super) fn palette_editor(app: &App) -> Element<'_, Message> {
             );
         }
     }
-    editor = editor.push(text("Готовые сочетания").size(12));
+    editor = editor.push(text("Presets").size(12));
     let mut presets = row![].spacing(8);
     for colors in [
         [0xc7c2df, 0xe7c4b5, 0xb8cddd],
@@ -107,13 +107,13 @@ pub(super) fn palette_editor(app: &App) -> Element<'_, Message> {
         .push(presets)
         .push(
             checkbox(app.settings.dark)
-                .label("Тёмная тема")
+                .label("Dark theme")
                 .on_toggle(Message::Dark),
         )
         .push(
             text(
-                "HEX: 6 символов. Цвет применяется сразу.
-Esc или щелчок снаружи — закрыть.",
+                "HEX: 6 characters. Changes apply immediately.
+Press Esc or click outside to close.",
             )
             .size(11),
         );

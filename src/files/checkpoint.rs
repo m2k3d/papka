@@ -49,7 +49,7 @@ pub(super) fn encode(cp: &Checkpoint) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(cp)?;
     if bytes.len() > 64 * 1024 {
         return Err(io::Error::other(
-            "Достигнут предел данных отмены (64 КиБ). Операция остановлена.",
+            "Undo data limit reached (64 KiB). Operation stopped.",
         ));
     }
     Ok(bytes)

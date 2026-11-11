@@ -29,7 +29,7 @@ impl Engine {
                 .iter()
                 .find(|r| r.id == id && r.finished.is_none())
                 .cloned()
-                .ok_or_else(|| io::Error::other("Незавершённая запись не найдена."))?;
+                .ok_or_else(|| io::Error::other("Incomplete record not found."))?;
             return journal.finish(id, ResultKind::Interrupted, record.checkpoint, now());
         }
         let super::prepare::Plan {
@@ -70,7 +70,7 @@ fn execute_items(
         if ctx.is_cancelled() {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
-                "Операция прервана; частичные результаты сохранены в истории.",
+                "Operation interrupted; partial results saved in history.",
             ));
         }
         let source = cp.items[index].source.path();

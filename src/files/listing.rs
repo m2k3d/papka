@@ -23,7 +23,7 @@ pub fn listing(path: PathBuf, settings: Settings, context: &mut Context) -> io::
         if context.is_cancelled() {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
-                "Чтение прервано",
+                "Reading interrupted",
             ));
         }
         let item = match item {
@@ -65,7 +65,7 @@ pub fn listing(path: PathBuf, settings: Settings, context: &mut Context) -> io::
     if context.is_cancelled() {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "Чтение прервано",
+            "Reading interrupted",
         ));
     }
     entries.sort_by(|a, b| {
@@ -89,7 +89,7 @@ pub fn listing(path: PathBuf, settings: Settings, context: &mut Context) -> io::
         if context.is_cancelled() {
             return Err(io::Error::new(
                 io::ErrorKind::Interrupted,
-                "Чтение прервано",
+                "Reading interrupted",
             ));
         }
         let batch: Vec<_> = entries.by_ref().take(256).collect();
@@ -99,7 +99,7 @@ pub fn listing(path: PathBuf, settings: Settings, context: &mut Context) -> io::
         context.data(Data::ListingBatch(batch));
     }
     context.data(Data::ListingEnd(
-        (skipped > 0).then(|| format!("Не удалось прочитать элементов: {skipped}")),
+        (skipped > 0).then(|| format!("Could not read {skipped} items")),
     ));
     Ok(())
 }

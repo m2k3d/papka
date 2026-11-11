@@ -18,9 +18,9 @@ pub enum DirectoryError {
 impl std::fmt::Display for DirectoryError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::ConfigUnavailable => "Не удалось определить папку настроек.",
-            Self::HistoryUnavailable => "Не удалось определить папку истории операций.",
-            Self::UnsupportedPlatform => "Хранение настроек на этой ОС пока не поддерживается.",
+            Self::ConfigUnavailable => "Could not locate the settings directory.",
+            Self::HistoryUnavailable => "Could not locate the operation history directory.",
+            Self::UnsupportedPlatform => "Settings storage is not supported on this OS yet.",
         })
     }
 }

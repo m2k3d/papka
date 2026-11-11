@@ -64,7 +64,7 @@ pub fn copy_symlink(source: &std::path::Path, target: &std::path::Path) -> std::
 pub fn sync_parent(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::File::open(
         path.parent()
-            .ok_or_else(|| std::io::Error::other("Нет родительского каталога."))?,
+            .ok_or_else(|| std::io::Error::other("No parent directory."))?,
     )?
     .sync_all()
 }

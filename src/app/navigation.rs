@@ -18,7 +18,7 @@ impl App {
             completion(files::listing(request.clone(), settings, ctx).map_err(|e| {
                 std::io::Error::new(
                     e.kind(),
-                    format!("Не удалось прочитать {}: {e}", request.display()),
+                    format!("Could not read {}: {e}", request.display()),
                 )
             }))
         }) {
@@ -118,7 +118,7 @@ impl App {
         self.entries = entries;
         let present: std::collections::HashSet<_> = self.entries.iter().map(|e| &e.path).collect();
         self.selection.retain(|p| present.contains(p));
-        self.status = warning.unwrap_or_else(|| format!("Элементов: {}", self.entries.len()));
+        self.status = warning.unwrap_or_else(|| format!("Items: {}", self.entries.len()));
     }
 
     pub fn visible(&self) -> Vec<&Entry> {

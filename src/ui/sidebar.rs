@@ -52,7 +52,7 @@ fn sidebar_tool<'a>(
 ) -> Element<'a, Message> {
     iced::widget::tooltip(
         button(sidebar_icon(symbol, enabled))
-            .padding(8)
+            .padding(6)
             .style(|theme, status| sidebar_style(theme, status, false))
             .on_press_maybe(enabled.then_some(message)),
         container(text(label).size(12))
@@ -65,11 +65,16 @@ fn sidebar_tool<'a>(
 
 pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
     let navigation = row![
-        sidebar_tool("arrow-left", "Назад", Message::Back, app.can_back()),
-        sidebar_tool("arrow-right", "Вперёд", Message::Forward, app.can_forward()),
+        sidebar_tool("arrow-left", "Back", Message::Back, app.can_back()),
+        sidebar_tool(
+            "arrow-right",
+            "Forward",
+            Message::Forward,
+            app.can_forward()
+        ),
         sidebar_tool(
             "arrow-up",
-            "Вверх",
+            "Up",
             Message::Up,
             app.directory.parent().is_some()
         )
@@ -82,7 +87,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
                 .size(13)
                 .wrapping(text::Wrapping::None),
         )
-        .padding([12, 12])
+        .padding([8, 10])
         .width(Fill)
         .style(|theme: &Theme, status| {
             let mut style = sidebar_style(theme, status, false);
@@ -94,13 +99,13 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         .on_press(Message::EditPath)
         .into()
     })
-    .height(44);
+    .height(36);
     let section = |label| {
         text(label).size(11).style(|theme: &Theme| text::Style {
             color: Some(theme.palette().text.scale_alpha(0.6)),
         })
     };
-    let mut links = column![container(section("Быстрый доступ")).padding([8, 12])].spacing(4);
+    let mut links = column![container(section("Quick access")).padding([6, 10])].spacing(2);
     for path in &app.settings.quick_access {
         let active = path == &app.directory;
         let symbol = [
@@ -125,11 +130,11 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
                 sidebar_icon(symbol, true),
                 text(label).size(13).wrapping(text::Wrapping::None)
             ]
-            .spacing(10)
+            .spacing(8)
             .align_y(iced::Center),
         )
         .width(Fill)
-        .padding([10, 12])
+        .padding([6, 10])
         .style(move |theme, status| sidebar_style(theme, status, active))
         .on_press(Message::Navigate(path.clone()));
         links = links.push(
@@ -147,21 +152,25 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         );
     }
     links = links
-        .push(space().height(8))
-        .push(container(section("Устройства")).padding([8, 12]))
+        .push(space().height(6))
+        .push(container(section("Devices")).padding([6, 10]))
         .push(
-            button(row![sidebar_icon("hard-drive", true), text("/").size(13)].spacing(10))
-                .width(Fill)
-                .padding([10, 12])
-                .style(move |theme, status| {
-                    sidebar_style(theme, status, app.directory == PathBuf::from("/"))
-                })
-                .on_press(Message::Navigate(PathBuf::from("/"))),
+            button(
+                row![sidebar_icon("hard-drive", true), text("/").size(13)]
+                    .spacing(8)
+                    .align_y(iced::Center),
+            )
+            .width(Fill)
+            .padding([6, 10])
+            .style(move |theme, status| {
+                sidebar_style(theme, status, app.directory == PathBuf::from("/"))
+            })
+            .on_press(Message::Navigate(PathBuf::from("/"))),
         );
     let tools = row![
-        sidebar_tool("history", "История", Message::History, true),
+        sidebar_tool("history", "History", Message::History, true),
         space().width(Fill),
-        sidebar_tool("palette", "Цвета оформления", Message::Palette, true)
+        sidebar_tool("palette", "Appearance colors", Message::Palette, true)
     ]
     .spacing(4)
     .align_y(iced::Center);
@@ -178,7 +187,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         tools
     ]
     .spacing(8);
-    mouse_area(container(panel).padding([12, 10]).width(210).height(Fill))
+    mouse_area(container(panel).padding([10, 8]).width(196).height(Fill))
         .on_right_press(Message::SidebarContext(None))
         .into()
 }

@@ -11,10 +11,10 @@ use std::{fs, io, path::Path};
 fn tree_stamp(path: &Path, context: Option<&Context>, depth: usize) -> io::Result<u64> {
     use std::hash::{Hash, Hasher};
     if context.is_some_and(Context::is_cancelled) {
-        return Err(io::Error::new(io::ErrorKind::Interrupted, "Прервано"));
+        return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupted"));
     }
     if depth > 256 {
-        return Err(io::Error::other("Слишком глубокое дерево каталогов."));
+        return Err(io::Error::other("Directory tree is too deep."));
     }
     let before = stamp(path)?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -32,7 +32,7 @@ fn tree_stamp(path: &Path, context: Option<&Context>, depth: usize) -> io::Resul
     }
     if stamp(path)? != before {
         return Err(io::Error::other(
-            "Данные менялись во время проверки. Повторите действие.",
+            "Data changed during verification. Try again.",
         ));
     }
     Ok(hasher.finish())
@@ -41,7 +41,7 @@ pub(super) fn collect(path: &Path, nodes: &mut Vec<Node>, context: &Context) -> 
     let before = stamp(path)?;
     let tree = tree_stamp(path, Some(context), 0)?;
     if stamp(path)? != before {
-        return Err(io::Error::other("Данные изменились во время проверки."));
+        return Err(io::Error::other("Data changed during verification."));
     }
     nodes.push(Node {
         path: SavedPath::new(path),
@@ -53,14 +53,14 @@ pub(super) fn collect(path: &Path, nodes: &mut Vec<Node>, context: &Context) -> 
 pub(super) fn unchanged(nodes: &[Node], context: &Context) -> io::Result<()> {
     if nodes.is_empty() {
         return Err(io::Error::other(
-            "Нет подтверждённых данных для безопасной отмены.",
+            "No confirmed data for a safe undo.",
         ));
     }
     for node in nodes {
         let path = node.path.path();
         if stamp(&path)? != node.stamp || tree_stamp(&path, Some(context), 0)? != node.tree {
             return Err(io::Error::other(
-                "Данные изменились после операции. Отмена остановлена; файлы сохранены.",
+                "Data changed after the operation. Undo stopped; files preserved.",
             ));
         }
     }
