@@ -8,20 +8,16 @@ use iced::{
 
 pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
     match event {
-        iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => app.pointer = position,
+        iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+            app.set_pointer(position)
+        }
         iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button))
             if matches!(
                 button,
                 iced::mouse::Button::Back | iced::mouse::Button::Forward
             ) =>
         {
-            if app.dialog.is_none()
-                && app.conflict.is_none()
-                && app.context_menu.is_none()
-                && !app.show_path
-                && !app.show_palette
-                && !app.closing
-            {
+            if app.mouse_navigation_available() {
                 return update(
                     app,
                     if button == iced::mouse::Button::Back {
@@ -33,20 +29,15 @@ pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
             }
         }
         iced::Event::Window(iced::window::Event::CloseRequested) => {
-            app.closing = true;
-            if let Some(ticket) = &app.mutation {
-                ticket.cancellation.request();
-                app.status = "Завершение операции перед закрытием…".into();
-            }
+            app.request_close();
         }
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-            app.selection_control = modifiers.control();
-            app.selection_shift = modifiers.shift();
+            app.selection_modifiers(modifiers.control(), modifiers.shift());
         }
         iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
             if app.context_menu.is_some() {
                 if key == keyboard::Key::Named(Named::Escape) {
-                    app.context_menu = None;
+                    app.close_context();
                 }
                 return Task::none();
             }
@@ -58,7 +49,7 @@ pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
             }
             if app.show_palette {
                 if key == keyboard::Key::Named(Named::Escape) {
-                    app.show_palette = false;
+                    app.close_palette();
                 }
                 return Task::none();
             }
@@ -95,7 +86,7 @@ pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
                     "r" => Some(Message::Refresh),
                     "h" => Some(Message::Hidden(!app.settings.hidden)),
                     "a" if app.dialog.is_none() => {
-                        app.selection = app.visible().iter().map(|e| e.path.clone()).collect();
+                        app.select_all();
                         None
                     }
                     "c" | "x" if app.dialog.is_none() => {
