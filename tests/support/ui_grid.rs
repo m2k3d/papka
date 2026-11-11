@@ -887,4 +887,129 @@ mod grid_tests {
             )))
         )));
     }
+    #[test]
+    fn refactor_appearance_messages_validate_hex_and_dispatch_all_preferences() {
+        let mut app = App::default();
+        let directory = app.directory.clone();
+        app.settings.palette = [0x102030, 0x405060, 0x708090];
+        apply(&mut app, Message::Palette);
+        assert!(app.show_palette);
+        assert_eq!(app.palette_inputs, ["102030", "405060", "708090"]);
+        for (input, expected) in [
+            ("#aBcDeF", 0xabcdef),
+            ("bad", 0xabcdef),
+            ("GGGGGG", 0xabcdef),
+        ] {
+            apply(&mut app, Message::PaletteColor(1, input.into()));
+            assert_eq!(app.settings.palette[1], expected);
+            assert_eq!(app.palette_inputs[1], input);
+        }
+        let colors = app.settings.palette;
+        apply(&mut app, Message::PaletteColor(3, "FFFFFF".into()));
+        assert_eq!(app.settings.palette, colors);
+        for (input, expected) in [(0, 1), (2, 2), (255, 3)] {
+            apply(&mut app, Message::PaletteCount(input));
+            assert_eq!(app.settings.palette_count, expected);
+        }
+        apply(&mut app, Message::Preset([0, 0x123456, 0xffffff]));
+        assert_eq!(app.palette_inputs, ["000000", "123456", "FFFFFF"]);
+        apply(&mut app, Message::Dark(true));
+        apply(&mut app, Message::Reduced(true));
+        apply(&mut app, Message::Descending(true));
+        apply(&mut app, Message::Sort(crate::files::Sort::Modified));
+        app.selection.insert(directory.join("selected"));
+        apply(&mut app, Message::Hidden(true));
+        assert!(
+            app.settings.dark
+                && app.settings.reduced_motion
+                && app.settings.descending
+                && app.settings.hidden
+        );
+        assert_eq!(app.settings.sort, crate::files::Sort::Modified);
+        assert!(app.selection.is_empty());
+        assert_eq!(app.directory, directory);
+        apply(&mut app, Message::ClosePalette);
+        assert!(!app.show_palette);
+    }
+
+    #[test]
+    fn refactor_frame_expires_timers_independently_without_sleep() {
+        let mut app = App::default();
+        let now = Instant::now();
+        app.last_file_scroll = Some(now - Duration::from_secs(2));
+        app.last_sidebar_scroll = Some(now);
+        app.transition = Some(now - Duration::from_millis(500));
+        apply(&mut app, Message::Frame);
+        assert!(app.last_file_scroll.is_none());
+        assert_eq!(app.last_sidebar_scroll, Some(now));
+        assert!(app.transition.is_none());
+        app.last_sidebar_scroll = Some(now - Duration::from_secs(2));
+        apply(&mut app, Message::Frame);
+        assert!(app.last_sidebar_scroll.is_none());
+    }
+
+    #[test]
+    fn refactor_escape_reaches_each_editor_after_input_extraction() {
+        use iced::keyboard::{Key, Location, Modifiers, key};
+        let escape = || {
+            Message::Keyboard(iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Escape),
+                modified_key: Key::Named(Named::Escape),
+                physical_key: key::Physical::Code(key::Code::Escape),
+                location: Location::Standard,
+                modifiers: Modifiers::default(),
+                text: None,
+                repeat: false,
+            }))
+        };
+        let mut app = App::default();
+        app.selection.insert(PathBuf::from("selected"));
+        app.show_palette = true;
+        apply(&mut app, escape());
+        assert!(!app.show_palette);
+        app.show_path = true;
+        app.path_dirty = true;
+        apply(&mut app, escape());
+        assert!(!app.show_path && !app.path_dirty);
+        app.dialog = Some(Dialog::Create(true));
+        apply(&mut app, escape());
+        assert!(app.dialog.is_none());
+        assert_eq!(app.selection.len(), 1);
+    }
+
+    #[test]
+    fn refactor_grid_and_footer_agree_at_page_boundary_and_stale_page() {
+        let (_dir, mut app) = sample(201);
+        let size = Size::new(1120., 760.);
+        let (first, _, _) = inspect(&app, size, &[]);
+        assert_eq!(first.names.len(), 200);
+        assert!(first.labels.iter().any(|label| label == "1 / 2"));
+        apply(&mut app, Message::Page(true));
+        let (last, _, _) = inspect(&app, size, &[]);
+        assert_eq!(last.names.len(), 1);
+        assert_eq!(last.names[0].0, "grid-200");
+        assert!(last.labels.iter().any(|label| label == "2 / 2"));
+        app.page = usize::MAX;
+        let (stale, _, _) = inspect(&app, size, &[]);
+        assert_eq!(stale.names.len(), 1);
+        assert!(stale.labels.iter().any(|label| label == "2 / 2"));
+        app.page = 0;
+        apply(&mut app, Message::Settings);
+        let (settings, _, _) = inspect(&app, size, &[]);
+        assert!(
+            settings
+                .labels
+                .iter()
+                .any(|label| label == "Показывать скрытые файлы")
+        );
+        apply(&mut app, Message::History);
+        assert!(!app.show_settings && app.show_history);
+        let (history, _, _) = inspect(&app, size, &[]);
+        assert!(
+            history
+                .labels
+                .iter()
+                .any(|label| label == "История пока пуста")
+        );
+    }
 }
