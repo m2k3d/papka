@@ -76,8 +76,14 @@ mod grid_tests {
         size: Size,
         events: &[(iced::Event, Point)],
     ) -> (Geometry, Vec<(Rectangle, f32)>, Vec<Message>) {
+        iced_graphics::text::font_system()
+            .write()
+            .unwrap()
+            .load_font(std::borrow::Cow::Borrowed(include_bytes!(
+                "../assets/fonts/caskaydia-cove/CaskaydiaCoveNerdFont-Regular.ttf"
+            )));
         let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
-            iced::Font::default(),
+            iced::Font::with_name("CaskaydiaCove Nerd Font"),
             16.into(),
         ));
         iced::advanced::Renderer::reset(&mut renderer, Rectangle::with_size(size));
@@ -180,25 +186,82 @@ mod grid_tests {
     }
     #[test]
     fn grid_fills_width_and_last_row_keeps_column_alignment() {
-        let (_dir, app) = sample(7);
+        let (_dir, app) = sample(10);
         let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
         let first = first_row(&g);
-        assert!(first.len() > 1 && first.len() < 7);
+        assert!(first.len() > 1 && first.len() < 10);
         for pair in first.windows(2) {
             approx(pair[0].width, pair[1].width);
-            approx(pair[1].x - pair[0].x, pair[0].width + 36.);
+            approx(pair[1].x - pair[0].x, pair[0].width + 18.);
         }
         let last = g.names.last().unwrap().1;
         approx(last.x, first[(g.names.len() - 1) % first.len()].x);
         approx(last.width, first[0].width);
         let (scroll, content) = g.scrolls[0];
         approx(scroll.width, content.width);
-        let left = first[0].x - 12.;
-        let right = first.last().unwrap().x + first.last().unwrap().width + 12.;
+        let left = first[0].x - 6.;
+        let right = first.last().unwrap().x + first.last().unwrap().width + 6.;
         approx(left, scroll.x);
         approx(right, scroll.x + scroll.width);
-        approx(scroll.x + scroll.width, 1120. - 32.);
+        approx(scroll.x + scroll.width, 1120. - 26.);
     }
+    #[test]
+    fn compact_grid_fills_width_across_column_boundaries() {
+        let (_dir, app) = sample(31);
+        for width in (430..=1800).step_by(17).chain([
+            507, 508, 509, 541, 542, 543, 637, 638, 639, 640, 641, 767, 768, 769, 897, 898, 899,
+        ]) {
+            let (g, _, _) = inspect(&app, Size::new(width as f32, 900.), &[]);
+            let first = first_row(&g);
+            let (scroll, _) = g.scrolls[0];
+            let card_width = first[0].width + 12.;
+            approx(first[0].x - 6., scroll.x);
+            approx(
+                first.last().unwrap().x + first.last().unwrap().width + 6.,
+                scroll.x + scroll.width,
+            );
+            // После узкого перехода к трём колонкам карточки не шире 124.
+            if scroll.width >= 288. {
+                assert!(card_width <= 124.6, "window={width}, card={card_width}");
+            }
+            for pair in first.windows(2) {
+                approx(pair[1].x - pair[0].x, card_width + 6.);
+            }
+            for (index, (_, rect)) in g.names.iter().enumerate() {
+                approx(rect.x, first[index % first.len()].x);
+                approx(rect.width, first[0].width);
+                assert!(rect.x + rect.width <= scroll.x + scroll.width + 0.6);
+            }
+        }
+    }
+
+    #[test]
+    fn material_ui_labels_are_english_and_font_is_loadable() {
+        let (_dir, mut app) = sample(0);
+        for panel in 0..4 {
+            app.show_settings = panel == 1;
+            app.show_history = panel == 2;
+            app.show_palette = panel == 3;
+            let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
+            assert!(g.labels.iter().any(|s| s == "Quick access"));
+            assert!(g.labels.iter().any(|s| s == "Devices"));
+            for label in &g.labels {
+                assert!(
+                    !label
+                        .chars()
+                        .any(|c| ('\u{0400}'..='\u{04ff}').contains(&c)),
+                    "{label}"
+                );
+            }
+        }
+        let mut fonts = iced_graphics::text::font_system().write().unwrap();
+        assert!(fonts.raw().db().faces().any(|face| {
+            face.families
+                .iter()
+                .any(|(family, _)| family == "CaskaydiaCove Nerd Font")
+        }));
+    }
+
     #[test]
     fn resizing_changes_spacing_and_wraps_columns() {
         let (_dir, app) = sample(12);
@@ -223,7 +286,7 @@ mod grid_tests {
         }
         let (_dir, app) = sample(0);
         let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
-        assert!(g.labels.iter().any(|s| s == "Папка пуста"));
+        assert!(g.labels.iter().any(|s| s == "This folder is empty"));
     }
     #[test]
     fn scrollbar_is_hidden_idle_visible_after_scroll_and_fades_without_moving_grid() {
@@ -327,10 +390,10 @@ mod grid_tests {
         let (_dir, mut app) = sample(0);
         let size = Size::new(1120., 760.);
         let (g, _, _) = inspect(&app, size, &[]);
-        assert!(!g.labels.iter().any(|s| s == "Настройки"));
+        assert!(!g.labels.iter().any(|s| s == "Settings"));
         app.context_menu = Some((None, Point::new(400., 200.)));
         let (g, _, _) = inspect(&app, size, &[]);
-        assert!(g.labels.iter().any(|s| s == "Настройки"));
+        assert!(g.labels.iter().any(|s| s == "Settings"));
         apply(&mut app, Message::MenuAction(Box::new(Message::Settings)));
         assert!(app.show_settings && app.context_menu.is_none());
     }
@@ -350,21 +413,21 @@ mod grid_tests {
                 let left = g
                     .texts
                     .iter()
-                    .find(|(s, _)| s.starts_with("Элементов:"))
+                    .find(|(s, _)| s.starts_with("Items:"))
                     .unwrap()
                     .1;
                 let right = g
                     .texts
                     .iter()
-                    .find(|(s, _)| s.starts_with("Выделено:"))
+                    .find(|(s, _)| s.starts_with("Selected:"))
                     .unwrap()
                     .1;
-                approx(left.x - surface.x, 24.);
-                approx(surface.x + surface.width - right.x - right.width, 24.);
+                approx(left.x - surface.x, 18.);
+                approx(surface.x + surface.width - right.x - right.width, 18.);
                 let first = first_row(&g);
-                approx(first[0].x - 12., left.x);
+                approx(first[0].x - 6., left.x);
                 let last = first.last().unwrap();
-                approx(last.x + last.width + 12., right.x + right.width);
+                approx(last.x + last.width + 6., right.x + right.width);
             }
         }
     }
@@ -376,8 +439,8 @@ mod grid_tests {
             let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
             assert!(g.icons.len() >= 7, "SVG не попали в draw: {:?}", g.icons);
             for (index, (bounds, color)) in g.icons.iter().enumerate() {
-                approx(bounds.width, 20.);
-                approx(bounds.height, 20.);
+                approx(bounds.width, 24.);
+                approx(bounds.height, 24.);
                 if index >= 3 {
                     assert_eq!(*color, Some(theme(dark).palette().text));
                 }
@@ -461,14 +524,14 @@ mod grid_tests {
             background.shutdown();
             match outcome {
                 Outcome::Success => {
-                    assert_eq!(app.status, "Элементов: 3");
+                    assert_eq!(app.status, "Items: 3");
                     assert!(app.operation_notice.is_none());
                 }
                 Outcome::Interrupted => assert!(
                     app.operation_notice
                         .as_ref()
                         .unwrap()
-                        .contains("Прерывание завершено")
+                        .contains("Operation stopped")
                 ),
                 Outcome::Failed(_) => {
                     assert_eq!(app.error.as_deref(), Some("Ошибка проверки"));
@@ -476,7 +539,7 @@ mod grid_tests {
                         app.operation_notice
                             .as_ref()
                             .unwrap()
-                            .contains("не завершена полностью")
+                            .contains("Operation is incomplete")
                     );
                 }
             }
@@ -533,7 +596,7 @@ mod grid_tests {
         let selection = app.selection.clone();
         let size = Size::new(1120., 760.);
         let (g, _, _) = inspect(&app, size, &[]);
-        assert!(g.labels.contains(&"Быстрый доступ".into()));
+        assert!(g.labels.contains(&"Quick access".into()));
         assert!(g.labels.contains(&"Actual-name".into()));
         assert!(
             !g.labels
@@ -569,11 +632,13 @@ mod grid_tests {
             apply(&mut app, messages[0].clone());
             assert_eq!(app.selection, selection);
             let (menu, _, _) = inspect(&app, size, &[]);
-            assert!(menu.labels.contains(&"Закрепить текущую папку".into()));
-            assert!(!menu.labels.iter().any(|s| {
-                ["В корзину", "Создать файл", "Вырезать", "Переименовать"].contains(&s.as_str())
-            }));
-            assert!(menu.labels.iter().any(|s| s.starts_with("Убрать")));
+            assert!(menu.labels.contains(&"Pin current folder".into()));
+            assert!(
+                !menu.labels.iter().any(|s| {
+                    ["Move to Trash", "New file", "Cut", "Rename"].contains(&s.as_str())
+                })
+            );
+            assert!(menu.labels.iter().any(|s| s.starts_with("Unpin")));
             apply(&mut app, Message::CloseContext);
         }
         app.page = 2;
@@ -668,7 +733,7 @@ mod grid_tests {
     }
 
     #[test]
-    fn latest_grid_uses_distinct_embedded_lucide_files_folders_and_links() {
+    fn latest_grid_uses_material_files_folders_and_link_overlays() {
         use std::os::unix::fs::symlink;
         let (dir, mut app) = sample(1);
         std::fs::create_dir(dir.path().join("folder")).unwrap();
@@ -695,20 +760,31 @@ mod grid_tests {
             .zip(&g.svg_handles)
             .filter(|((r, _), _)| r.x > 200.)
             .collect();
-        assert_eq!(handles.len(), 4);
-        let expected: [&[u8]; 4] = [
-            include_bytes!("../assets/icons/lucide/folder.svg"),
-            include_bytes!("../assets/icons/lucide/folder-symlink.svg"),
-            include_bytes!("../assets/icons/lucide/file.svg"),
-            include_bytes!("../assets/icons/lucide/file-symlink.svg"),
-        ];
-        for bytes in expected {
+        assert_eq!(handles.len(), 6);
+        for (bytes, count, size) in [
+            (
+                include_bytes!("../assets/icons/material/folder.svg").as_slice(),
+                2,
+                68.,
+            ),
+            (
+                include_bytes!("../assets/icons/material/file.svg").as_slice(),
+                2,
+                68.,
+            ),
+            (
+                include_bytes!("../assets/icons/material/file-symlink.svg").as_slice(),
+                2,
+                26.,
+            ),
+        ] {
             let handle = iced::widget::svg::Handle::from_memory(bytes);
-            assert_eq!(handles.iter().filter(|(_, h)| **h == handle).count(), 1);
-        }
-        for ((r, _), _) in handles {
-            approx(r.width, 52.);
-            approx(r.height, 52.);
+            let matching: Vec<_> = handles.iter().filter(|(_, h)| **h == handle).collect();
+            assert_eq!(matching.len(), count);
+            for ((r, _), _) in matching {
+                approx(r.width, size);
+                approx(r.height, size);
+            }
         }
     }
 
@@ -1000,16 +1076,11 @@ mod grid_tests {
             settings
                 .labels
                 .iter()
-                .any(|label| label == "Показывать скрытые файлы")
+                .any(|label| label == "Show hidden files")
         );
         apply(&mut app, Message::History);
         assert!(!app.show_settings && app.show_history);
         let (history, _, _) = inspect(&app, size, &[]);
-        assert!(
-            history
-                .labels
-                .iter()
-                .any(|label| label == "История пока пуста")
-        );
+        assert!(history.labels.iter().any(|label| label == "No history yet"));
     }
 }
