@@ -69,6 +69,7 @@ pub struct Settings {
     pub palette: [u32; 3],
     pub palette_count: u8,
     pub reduced_motion: bool,
+    pub quick_access: Vec<PathBuf>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -80,8 +81,29 @@ impl Default for Settings {
             palette: [0xc7c2df, 0xe7c4b5, 0xb8cddd],
             palette_count: 3,
             reduced_motion: false,
+            quick_access: default_quick_access(),
         }
     }
+}
+fn default_quick_access() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for path in [
+        dirs::home_dir(),
+        dirs::desktop_dir(),
+        dirs::document_dir(),
+        dirs::download_dir(),
+        dirs::audio_dir(),
+        dirs::picture_dir(),
+        dirs::video_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Sort {

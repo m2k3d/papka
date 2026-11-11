@@ -18,7 +18,10 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 enum Message {
     Context(Option<PathBuf>),
+    SidebarContext(Option<PathBuf>),
     CloseContext,
+    Pin(PathBuf),
+    Unpin(PathBuf),
     MenuAction(Box<Message>),
     EditPath,
     ClosePath,
@@ -64,6 +67,7 @@ enum Message {
     Tick,
     Frame,
     FilesScrolled,
+    SidebarScrolled,
     Page(bool),
     Acknowledge(u64),
     ResolveConflict,
@@ -87,9 +91,27 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             if let Some(path) = &target {
                 app.select_context(path.clone());
             }
+            app.sidebar_context = false;
             app.context_menu = Some((target, app.pointer));
         }
+        Message::SidebarContext(target) => {
+            if app.dialog.is_none() && app.conflict.is_none() && !app.show_path && !app.show_palette
+            {
+                app.sidebar_context = true;
+                app.context_menu = Some((target, app.pointer));
+            }
+        }
         Message::CloseContext => app.context_menu = None,
+        Message::Pin(path) => {
+            if !app.settings.quick_access.contains(&path) {
+                app.settings.quick_access.push(path);
+                app.persist_settings();
+            }
+        }
+        Message::Unpin(path) => {
+            app.settings.quick_access.retain(|p| p != &path);
+            app.persist_settings();
+        }
         Message::MenuAction(action) => {
             app.context_menu = None;
             return update(app, *action);
@@ -259,8 +281,15 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         Message::Acknowledge(id) => app.execute(Command::Acknowledge(id)),
+        Message::SidebarScrolled => app.last_sidebar_scroll = Some(std::time::Instant::now()),
         Message::FilesScrolled => app.last_file_scroll = Some(std::time::Instant::now()),
         Message::Frame => {
+            if app
+                .last_sidebar_scroll
+                .is_some_and(|t| t.elapsed().as_millis() >= 1000)
+            {
+                app.last_sidebar_scroll = None;
+            }
             if app
                 .last_file_scroll
                 .is_some_and(|t| t.elapsed().as_millis() >= 1000)
@@ -286,6 +315,29 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Keyboard(event) => match event {
             iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                 app.pointer = position
+            }
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button))
+                if matches!(
+                    button,
+                    iced::mouse::Button::Back | iced::mouse::Button::Forward
+                ) =>
+            {
+                if app.dialog.is_none()
+                    && app.conflict.is_none()
+                    && app.context_menu.is_none()
+                    && !app.show_path
+                    && !app.show_palette
+                    && !app.closing
+                {
+                    return update(
+                        app,
+                        if button == iced::mouse::Button::Back {
+                            Message::Back
+                        } else {
+                            Message::Forward
+                        },
+                    );
+                }
             }
             iced::Event::Window(iced::window::Event::CloseRequested) => {
                 app.closing = true;
@@ -390,6 +442,9 @@ fn subscription(app: &App) -> Subscription<Message> {
             if matches!(
                 event,
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { .. })
+                    | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Back | iced::mouse::Button::Forward
+                    ))
                     | iced::Event::Keyboard(keyboard::Event::ModifiersChanged(_))
                     | iced::Event::Window(iced::window::Event::CloseRequested)
             ) || status == iced::event::Status::Ignored
@@ -402,6 +457,7 @@ fn subscription(app: &App) -> Subscription<Message> {
         iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::Tick),
         if (app.transition.is_some() && !app.settings.reduced_motion)
             || app.last_file_scroll.is_some()
+            || app.last_sidebar_scroll.is_some()
         {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame)
         } else {
@@ -596,19 +652,6 @@ fn view(app: &App) -> Element<'_, Message> {
                         };
                         theme(app.settings.dark).palette().text.scale_alpha(opacity)
                     }),
-                text(if entry.directory {
-                    "Папка".into()
-                } else {
-                    size(entry.size)
-                })
-                .size(11)
-                .color(if app.settings.dark {
-                    iced::color!(0x9da0ac)
-                } else {
-                    iced::color!(0x777985)
-                })
-                .width(Fill)
-                .align_x(iced::Center),
             ]
             .spacing(8)
             .align_x(iced::Center);
@@ -647,49 +690,14 @@ fn view(app: &App) -> Element<'_, Message> {
         rows.into()
     })
     .height(Length::Shrink);
-    let scroll_opacity = app.last_file_scroll.map_or(0.0, |start| {
-        let elapsed = start.elapsed().as_secs_f32();
-        if app.settings.reduced_motion {
-            if elapsed < 1.0 { 1.0 } else { 0.0 }
-        } else {
-            ((1.0 - elapsed) / 0.2).clamp(0.0, 1.0)
-        }
-    });
     content = content.push(
-        scrollable(grid)
-            .id("files")
-            .width(Fill)
-            .height(Fill)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(5)
-                    .scroller_width(5)
-                    .margin(0),
-            ))
-            .on_scroll(|_| Message::FilesScrolled)
-            .style(move |theme: &Theme, status| {
-                let mut style = scrollable::default(theme, status);
-                let opacity = if matches!(
-                    status,
-                    scrollable::Status::Dragged {
-                        is_vertical_scrollbar_dragged: true,
-                        ..
-                    }
-                ) {
-                    1.0
-                } else {
-                    scroll_opacity
-                };
-                style.vertical_rail.background = None;
-                style.vertical_rail.border = iced::Border::default();
-                style.vertical_rail.scroller.background =
-                    theme.palette().text.scale_alpha(0.35 * opacity).into();
-                style.vertical_rail.scroller.border = iced::Border {
-                    radius: 3.into(),
-                    ..Default::default()
-                };
-                style
-            }),
+        panel_scrollable(
+            grid.into(),
+            app.last_file_scroll,
+            app.settings.reduced_motion,
+        )
+        .id("files")
+        .on_scroll(|_| Message::FilesScrolled),
     );
     let mut footer = row![
         text(if app.loading.is_some() {
@@ -854,6 +862,38 @@ fn context_menu<'a>(
         action(label, Message::MenuAction(Box::new(message)), enabled).width(Fill)
     };
     let mut menu = column![].spacing(2);
+    if app.sidebar_context {
+        menu = menu.push(item(
+            "Закрепить текущую папку",
+            Message::Pin(app.directory.clone()),
+            !app.settings.quick_access.contains(&app.directory),
+        ));
+        if let Some(path) = target {
+            menu = menu.push(item(
+                "Убрать из быстрого доступа",
+                Message::Unpin(path.clone()),
+                true,
+            ));
+        } else if !app.settings.quick_access.is_empty() {
+            menu = menu.push(horizontal_rule(1));
+            for path in &app.settings.quick_access {
+                let label = format!(
+                    "Убрать: {}",
+                    path.file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy()
+                );
+                menu = menu.push(
+                    button(text(label).size(14))
+                        .padding([8, 12])
+                        .width(Fill)
+                        .style(button::text)
+                        .on_press(Message::MenuAction(Box::new(Message::Unpin(path.clone())))),
+                );
+            }
+        }
+        return menu;
+    }
     if let Some(path) = target {
         menu = menu
             .push(item("Открыть", Message::Open(path.clone()), idle))
@@ -869,6 +909,26 @@ fn context_menu<'a>(
             ))
             .push(horizontal_rule(1))
             .push(item("В корзину", Message::Trash, idle));
+        if app
+            .entries
+            .iter()
+            .any(|entry| &entry.path == path && entry.directory)
+        {
+            let pinned = app.settings.quick_access.contains(path);
+            menu = menu.push(item(
+                if pinned {
+                    "Убрать из быстрого доступа"
+                } else {
+                    "Закрепить в быстром доступе"
+                },
+                if pinned {
+                    Message::Unpin(path.clone())
+                } else {
+                    Message::Pin(path.clone())
+                },
+                true,
+            ));
+        }
     } else {
         menu = menu
             .push(item("Создать папку", Message::Create(true), idle))
@@ -938,6 +998,52 @@ fn palette_background(app: &App) -> iced::Background {
     iced::Background::Gradient(gradient.into())
 }
 // Размер места под будущие иконки не зависит от временного символа.
+fn panel_scrollable<'a>(
+    content: Element<'a, Message>,
+    last_scroll: Option<std::time::Instant>,
+    reduced_motion: bool,
+) -> iced::widget::Scrollable<'a, Message> {
+    let opacity = last_scroll.map_or(0.0, |start| {
+        let elapsed = start.elapsed().as_secs_f32();
+        if reduced_motion {
+            if elapsed < 1.0 { 1.0 } else { 0.0 }
+        } else {
+            ((1.0 - elapsed) / 0.2).clamp(0.0, 1.0)
+        }
+    });
+    scrollable(content)
+        .width(Fill)
+        .height(Fill)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(5)
+                .scroller_width(5)
+                .margin(0),
+        ))
+        .style(move |theme: &Theme, status| {
+            let mut style = scrollable::default(theme, status);
+            let opacity = if matches!(
+                status,
+                scrollable::Status::Dragged {
+                    is_vertical_scrollbar_dragged: true,
+                    ..
+                }
+            ) {
+                1.0
+            } else {
+                opacity
+            };
+            style.vertical_rail.background = None;
+            style.vertical_rail.border = iced::Border::default();
+            style.vertical_rail.scroller.background =
+                theme.palette().text.scale_alpha(0.35 * opacity).into();
+            style.vertical_rail.scroller.border = iced::Border {
+                radius: 3.into(),
+                ..Default::default()
+            };
+            style
+        })
+}
 fn sidebar_icon(name: &str, enabled: bool) -> Element<'_, Message> {
     use iced::widget::svg;
     // SVG включены в бинарник: внешний каталог ресурсов при запуске не нужен.
@@ -955,6 +1061,9 @@ fn sidebar_icon(name: &str, enabled: bool) -> Element<'_, Message> {
         "hard-drive" => include_bytes!("../assets/icons/lucide/hard-drive.svg"),
         "history" => include_bytes!("../assets/icons/lucide/history.svg"),
         "palette" => include_bytes!("../assets/icons/lucide/palette.svg"),
+        "folder" => include_bytes!("../assets/icons/lucide/folder.svg"),
+        "plus" => include_bytes!("../assets/icons/lucide/plus.svg"),
+        "x" => include_bytes!("../assets/icons/lucide/x.svg"),
         _ => unreachable!("Неизвестная иконка боковой панели"),
     };
     svg(svg::Handle::from_memory(bytes))
@@ -1043,36 +1152,63 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         })
     };
     let mut links = column![container(section("Быстрый доступ")).padding([8, 12])].spacing(4);
-    for (symbol, label, path) in [
-        ("house", "Главная", dirs::home_dir()),
-        ("monitor", "Рабочий стол", dirs::desktop_dir()),
-        ("file-text", "Документы", dirs::document_dir()),
-        ("download", "Загрузки", dirs::download_dir()),
-        ("music", "Музыка", dirs::audio_dir()),
-        ("image", "Изображения", dirs::picture_dir()),
-        ("clapperboard", "Видео", dirs::video_dir()),
-        ("hard-drive", "Файловая система", Some(PathBuf::from("/"))),
-    ] {
-        if let Some(path) = path {
-            let active = path == app.directory;
-            if path == PathBuf::from("/") {
-                links = links
-                    .push(space().height(8))
-                    .push(container(section("Устройства")).padding([8, 12]));
-            }
-            links = links.push(
-                button(
-                    row![sidebar_icon(symbol, true), text(label).size(13)]
-                        .spacing(10)
-                        .align_y(iced::Center),
+    for path in &app.settings.quick_access {
+        let active = path == &app.directory;
+        let symbol = [
+            ("house", dirs::home_dir()),
+            ("monitor", dirs::desktop_dir()),
+            ("file-text", dirs::document_dir()),
+            ("download", dirs::download_dir()),
+            ("music", dirs::audio_dir()),
+            ("image", dirs::picture_dir()),
+            ("clapperboard", dirs::video_dir()),
+        ]
+        .into_iter()
+        .find(|(_, candidate)| candidate.as_ref() == Some(path))
+        .map_or("folder", |(icon, _)| icon);
+        let label = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
+        let destination = button(
+            row![
+                sidebar_icon(symbol, true),
+                text(label).size(13).wrapping(text::Wrapping::None)
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        )
+        .width(Fill)
+        .padding([10, 12])
+        .style(move |theme, status| sidebar_style(theme, status, active))
+        .on_press(Message::Navigate(path.clone()));
+        links = links.push(
+            mouse_area(
+                iced::widget::tooltip(
+                    destination,
+                    container(text(path.to_string_lossy().into_owned()).size(12))
+                        .padding(8)
+                        .style(container::rounded_box),
+                    iced::widget::tooltip::Position::Right,
                 )
+                .gap(4),
+            )
+            .on_right_press(Message::SidebarContext(Some(path.clone()))),
+        );
+    }
+    links = links
+        .push(space().height(8))
+        .push(container(section("Устройства")).padding([8, 12]))
+        .push(
+            button(row![sidebar_icon("hard-drive", true), text("/").size(13)].spacing(10))
                 .width(Fill)
                 .padding([10, 12])
-                .style(move |theme, status| sidebar_style(theme, status, active))
-                .on_press(Message::Navigate(path)),
-            );
-        }
-    }
+                .style(move |theme, status| {
+                    sidebar_style(theme, status, app.directory == PathBuf::from("/"))
+                })
+                .on_press(Message::Navigate(PathBuf::from("/"))),
+        );
     let tools = row![
         sidebar_tool("history", "История", Message::History, true),
         space().width(Fill),
@@ -1084,64 +1220,38 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         navigation,
         path,
         space().height(4),
-        scrollable(links).height(Fill),
+        panel_scrollable(
+            links.into(),
+            app.last_sidebar_scroll,
+            app.settings.reduced_motion
+        )
+        .on_scroll(|_| Message::SidebarScrolled),
         tools
     ]
     .spacing(8);
     mouse_area(container(panel).padding([12, 10]).width(210).height(Fill))
-        .on_right_press(Message::Context(None))
+        .on_right_press(Message::SidebarContext(None))
         .into()
 }
 fn file_icon(directory: bool, link: bool) -> Element<'static, Message> {
-    let color = if directory {
-        iced::color!(0xf2c45e)
-    } else {
-        iced::color!(0xb9c8e3)
+    use iced::widget::svg;
+    let bytes: &[u8] = match (directory, link) {
+        (true, false) => include_bytes!("../assets/icons/lucide/folder.svg"),
+        (true, true) => include_bytes!("../assets/icons/lucide/folder-symlink.svg"),
+        (false, false) => include_bytes!("../assets/icons/lucide/file.svg"),
+        (false, true) => include_bytes!("../assets/icons/lucide/file-symlink.svg"),
     };
-    let tab = container(space())
-        .width(25)
-        .height(8)
-        .style(move |_| container::Style {
-            background: Some(color.into()),
-            border: iced::Border {
-                radius: iced::border::Radius {
-                    top_left: 5.,
-                    top_right: 5.,
-                    bottom_left: 0.,
-                    bottom_right: 0.,
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let body = container(
-        text(if link { "↗" } else { "" })
-            .size(18)
-            .color(iced::color!(0x765c25)),
-    )
-    .width(52)
-    .height(36)
-    .align_x(iced::Right)
-    .align_y(iced::Bottom)
-    .padding(3)
-    .style(move |_| container::Style {
-        background: Some(color.into()),
-        border: iced::Border {
-            radius: iced::border::Radius {
-                top_left: 0.,
-                top_right: 5.,
-                bottom_left: 5.,
-                bottom_right: 5.,
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    if directory {
-        column![tab, body].into()
-    } else {
-        container(body).padding([4, 8]).into()
-    }
+    svg(svg::Handle::from_memory(bytes))
+        .width(52)
+        .height(52)
+        .style(move |_: &Theme, _| svg::Style {
+            color: Some(if directory {
+                iced::color!(0xf2c45e)
+            } else {
+                iced::color!(0xb9c8e3)
+            }),
+        })
+        .into()
 }
 fn palette_editor(app: &App) -> Element<'_, Message> {
     let mut editor = column![
@@ -1257,18 +1367,6 @@ Esc или щелчок снаружи — закрыть.",
         .max_height(640)
         .style(container::rounded_box)
         .into()
-}
-
-fn size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} Б")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} КиБ", bytes as f64 / 1024.)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} МиБ", bytes as f64 / 1048576.)
-    } else {
-        format!("{:.1} ГиБ", bytes as f64 / 1073741824.)
-    }
 }
 
 fn theme(dark: bool) -> Theme {

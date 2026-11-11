@@ -23,6 +23,7 @@ pub struct App {
     pub settings: Settings,
     pub history: Vec<HistoryItem>,
     pub expanded_history: Option<u64>,
+    pub sidebar_context: bool,
     pub context_menu: Option<(Option<PathBuf>, iced::Point)>,
     pub pointer: iced::Point,
     pub show_path: bool,
@@ -50,6 +51,7 @@ pub struct App {
     auxiliary: BTreeSet<u64>,
     history_direction: i8,
     pub transition: Option<std::time::Instant>,
+    pub last_sidebar_scroll: Option<std::time::Instant>,
     pub last_file_scroll: Option<std::time::Instant>,
     last_click: Option<(PathBuf, std::time::Instant)>,
     pub clipboard: Option<(Vec<PathBuf>, bool)>,
@@ -77,6 +79,7 @@ impl Default for App {
             settings: Settings::default(),
             history: vec![],
             expanded_history: None,
+            sidebar_context: false,
             context_menu: None,
             pointer: iced::Point::ORIGIN,
             show_path: false,
@@ -104,6 +107,7 @@ impl Default for App {
             auxiliary: BTreeSet::new(),
             history_direction: 0,
             transition: None,
+            last_sidebar_scroll: None,
             last_file_scroll: None,
             last_click: None,
             clipboard: None,
@@ -498,6 +502,9 @@ impl App {
         self.page = 0;
         self.anchor = None;
         self.refresh();
+        self.persist_settings();
+    }
+    pub fn persist_settings(&mut self) {
         let Some(background) = &self.background else {
             return;
         };
