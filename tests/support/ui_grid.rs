@@ -17,6 +17,8 @@ mod grid_tests {
         texts: Vec<(String, Rectangle)>,
         icons: Vec<(Rectangle, Option<iced::Color>)>,
         surfaces: Vec<(Rectangle, f32)>,
+        all_thumbs: Vec<(Rectangle, iced::Color, f32)>,
+        svg_handles: Vec<iced::widget::svg::Handle>,
     }
     impl Operation for Geometry {
         fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
@@ -137,6 +139,7 @@ mod grid_tests {
                 for image in &layer.images {
                     if let iced_graphics::Image::Vector { svg, bounds, .. } = image {
                         geometry.icons.push((*bounds, svg.color));
+                        geometry.svg_handles.push(svg.handle.clone());
                     }
                 }
                 for (quad, background) in &layer.quads {
@@ -144,6 +147,15 @@ mod grid_tests {
                         geometry
                             .surfaces
                             .push((quad.bounds, quad.border.radius.top_left));
+                    }
+                    if (quad.bounds.width - 5.).abs() < 0.1 {
+                        if let iced::Background::Color(color) = background {
+                            geometry.all_thumbs.push((
+                                quad.bounds,
+                                *color,
+                                quad.border.radius.top_left,
+                            ));
+                        }
                     }
                     if quad.bounds.x > 200. && (quad.bounds.width - 5.).abs() < 0.1 {
                         if let iced::Background::Color(color) = background {
@@ -483,5 +495,396 @@ mod grid_tests {
             disabled.a < enabled.a,
             "Недоступная «Назад» должна быть приглушена относительно доступной «Вверх»: {disabled:?} / {enabled:?}"
         );
+    }
+
+    #[test]
+    fn latest_quick_access_migrates_and_round_trips_empty_and_custom_paths() {
+        use crate::files::Settings;
+        let old: Settings = serde_json::from_str(r#"{"dark":true}"#).unwrap();
+        assert!(old.dark);
+        assert_eq!(old.quick_access, Settings::default().quick_access);
+        let empty: Settings = serde_json::from_str(r#"{"quick_access":[]}"#).unwrap();
+        assert!(empty.quick_access.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        for paths in [
+            vec![],
+            vec![
+                dir.path().join("one/Downloads"),
+                dir.path().join("two/Downloads"),
+            ],
+        ] {
+            let settings = Settings {
+                quick_access: paths.clone(),
+                ..Settings::default()
+            };
+            let round: Settings =
+                serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(round.quick_access, paths);
+        }
+    }
+
+    #[test]
+    fn latest_sidebar_names_and_context_routing_do_not_change_file_selection() {
+        let (dir, mut app) = sample(3);
+        let pinned = dir.path().join("Actual-name");
+        std::fs::create_dir(&pinned).unwrap();
+        app.settings.quick_access = vec![pinned.clone()];
+        app.selection.insert(dir.path().join("grid-000"));
+        let selection = app.selection.clone();
+        let size = Size::new(1120., 760.);
+        let (g, _, _) = inspect(&app, size, &[]);
+        assert!(g.labels.contains(&"Быстрый доступ".into()));
+        assert!(g.labels.contains(&"Actual-name".into()));
+        assert!(
+            !g.labels
+                .iter()
+                .any(|s| ["Главная", "Рабочий стол"].contains(&s.as_str()))
+        );
+        // Три навигационные иконки, одна папка, диск и два нижних действия. Plus/x отсутствуют.
+        assert_eq!(g.icons.iter().filter(|(r, _)| r.x < 230.).count(), 7);
+        let r = g.texts.iter().find(|(s, _)| s == "Actual-name").unwrap().1;
+        for (point, expected) in [
+            (Point::new(r.center_x(), r.center_y()), Some(pinned.clone())),
+            (Point::new(40., 500.), None),
+        ] {
+            let (_, _, messages) = inspect(
+                &app,
+                size,
+                &[(
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Right,
+                    )),
+                    point,
+                )],
+            );
+            assert_eq!(
+                messages.len(),
+                1,
+                "Правый клик должен открыть ровно одно меню: {messages:?}"
+            );
+            assert!(
+                matches!(&messages[0],Message::SidebarContext(target) if target == &expected),
+                "{messages:?}"
+            );
+            apply(&mut app, messages[0].clone());
+            assert_eq!(app.selection, selection);
+            let (menu, _, _) = inspect(&app, size, &[]);
+            assert!(menu.labels.contains(&"Закрепить текущую папку".into()));
+            assert!(!menu.labels.iter().any(|s| {
+                ["В корзину", "Создать файл", "Вырезать", "Переименовать"].contains(&s.as_str())
+            }));
+            assert!(menu.labels.iter().any(|s| s.starts_with("Убрать")));
+            apply(&mut app, Message::CloseContext);
+        }
+        app.page = 2;
+        apply(&mut app, Message::Pin(pinned.clone()));
+        assert_eq!(app.settings.quick_access, vec![pinned.clone()]);
+        apply(&mut app, Message::Pin(dir.path().into()));
+        assert_eq!(app.settings.quick_access.len(), 2);
+        assert_eq!(app.page, 2);
+        assert_eq!(app.selection, selection);
+        apply(&mut app, Message::Unpin(pinned.clone()));
+        assert_eq!(app.settings.quick_access, vec![dir.path().to_path_buf()]);
+        assert!(pinned.is_dir());
+        assert_eq!(std::fs::read(dir.path().join("grid-000")).unwrap(), b"test");
+    }
+
+    #[test]
+    fn latest_sidebar_and_file_scrollbars_share_style_and_independent_timers() {
+        let (dir, mut app) = sample(80);
+        app.settings.quick_access = (0..30)
+            .map(|n| dir.path().join(format!("pin-{n}")))
+            .collect();
+        let size = Size::new(1120., 760.);
+        for dark in [false, true] {
+            app.settings.dark = dark;
+            app.last_file_scroll = None;
+            app.last_sidebar_scroll = None;
+            let (g, _, _) = inspect(&app, size, &[]);
+            assert!(g.all_thumbs.iter().all(|(_, c, _)| c.a == 0.));
+            app.last_sidebar_scroll = Some(Instant::now());
+            let (g, _, _) = inspect(&app, size, &[]);
+            assert!(g.all_thumbs.iter().any(|(r, c, _)| r.x < 230. && c.a > 0.3));
+            assert!(
+                g.all_thumbs
+                    .iter()
+                    .filter(|(r, _, _)| r.x > 230.)
+                    .all(|(_, c, _)| c.a == 0.)
+            );
+            app.last_file_scroll = Some(Instant::now());
+            let (g, _, _) = inspect(&app, size, &[]);
+            let left = g
+                .all_thumbs
+                .iter()
+                .find(|(r, c, _)| r.x < 230. && c.a > 0.3)
+                .unwrap();
+            let right = g
+                .all_thumbs
+                .iter()
+                .find(|(r, c, _)| r.x > 230. && c.a > 0.3)
+                .unwrap();
+            approx(left.0.width, 5.);
+            approx(right.0.width, 5.);
+            approx(left.2, 3.);
+            approx(right.2, 3.);
+            assert_eq!(left.1, right.1);
+            app.last_sidebar_scroll = Some(Instant::now() - Duration::from_millis(1100));
+            app.last_file_scroll = Some(Instant::now());
+            apply(&mut app, Message::Frame);
+            assert!(app.last_sidebar_scroll.is_none());
+            assert!(app.last_file_scroll.is_some());
+            apply(&mut app, Message::SidebarScrolled);
+            assert!(app.last_sidebar_scroll.is_some());
+        }
+        let (_, _, messages) = inspect(
+            &app,
+            size,
+            &[(
+                iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+                    delta: iced::mouse::ScrollDelta::Lines { x: 0., y: -2. },
+                }),
+                Point::new(100., 300.),
+            )],
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::SidebarScrolled)),
+            "{messages:?}"
+        );
+        // Первый кадр нового дерева может сообщить начальный viewport сетки,
+        // поэтому сравниваем его с таким же кадром без колеса.
+        let (_, _, baseline_messages) = inspect(&app, size, &[]);
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| matches!(m, Message::FilesScrolled))
+                .count(),
+            baseline_messages
+                .iter()
+                .filter(|m| matches!(m, Message::FilesScrolled))
+                .count(),
+        );
+    }
+
+    #[test]
+    fn latest_grid_uses_distinct_embedded_lucide_files_folders_and_links() {
+        use std::os::unix::fs::symlink;
+        let (dir, mut app) = sample(1);
+        std::fs::create_dir(dir.path().join("folder")).unwrap();
+        symlink("folder", dir.path().join("folder-link")).unwrap();
+        symlink("grid-000", dir.path().join("file-link")).unwrap();
+        let (background, rx) = Background::start().unwrap();
+        app.background = Some(background.clone());
+        app.refresh();
+        let id = app.loading.unwrap();
+        loop {
+            let e = rx.recv_blocking().unwrap();
+            let done = matches!(e,Event::Finished{id:finished,..}if finished==id);
+            app.apply(e);
+            if done {
+                break;
+            }
+        }
+        background.shutdown();
+        app.background = None;
+        let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
+        let handles: Vec<_> = g
+            .icons
+            .iter()
+            .zip(&g.svg_handles)
+            .filter(|((r, _), _)| r.x > 200.)
+            .collect();
+        assert_eq!(handles.len(), 4);
+        let expected: [&[u8]; 4] = [
+            include_bytes!("../assets/icons/lucide/folder.svg"),
+            include_bytes!("../assets/icons/lucide/folder-symlink.svg"),
+            include_bytes!("../assets/icons/lucide/file.svg"),
+            include_bytes!("../assets/icons/lucide/file-symlink.svg"),
+        ];
+        for bytes in expected {
+            let handle = iced::widget::svg::Handle::from_memory(bytes);
+            assert_eq!(handles.iter().filter(|(_, h)| **h == handle).count(), 1);
+        }
+        for ((r, _), _) in handles {
+            approx(r.width, 52.);
+            approx(r.height, 52.);
+        }
+    }
+
+    fn finish_read(app: &mut App, rx: &async_channel::Receiver<Event>) {
+        let id = app.loading.expect("Ожидалось чтение каталога");
+        loop {
+            let e = rx.recv_blocking().unwrap();
+            let done = matches!(e,Event::Finished{id:n,..}if n==id);
+            app.apply(e);
+            if done {
+                break;
+            }
+        }
+    }
+    #[test]
+    fn latest_mouse_back_forward_use_history_and_respect_modal_guards() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        let mut app = App::default();
+        let (bg, rx) = Background::start().unwrap();
+        app.background = Some(bg.clone());
+        app.navigate(first.clone());
+        finish_read(&mut app, &rx);
+        app.navigate(second.clone());
+        finish_read(&mut app, &rx);
+        let back = || {
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Back,
+            )))
+        };
+        for guard in 0..6 {
+            match guard {
+                0 => app.show_path = true,
+                1 => app.show_palette = true,
+                2 => app.context_menu = Some((None, Point::ORIGIN)),
+                3 => app.dialog = Some(Dialog::Create(true)),
+                4 => app.conflict = Some(Command::Create(dir.path().join("unused"), true)),
+                _ => app.closing = true,
+            }
+            apply(&mut app, back());
+            assert!(app.loading.is_none());
+            assert_eq!(app.directory, second);
+            app.show_path = false;
+            app.show_palette = false;
+            app.context_menu = None;
+            app.dialog = None;
+            app.conflict = None;
+            app.closing = false;
+        }
+        apply(&mut app, back());
+        finish_read(&mut app, &rx);
+        assert_eq!(app.directory, first);
+        apply(
+            &mut app,
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Back,
+            ))),
+        );
+        assert!(app.loading.is_none());
+        apply(
+            &mut app,
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Forward,
+            ))),
+        );
+        finish_read(&mut app, &rx);
+        assert_eq!(app.directory, second);
+        apply(
+            &mut app,
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Forward,
+            ))),
+        );
+        assert!(app.loading.is_none());
+        bg.shutdown();
+    }
+    #[test]
+    fn latest_settings_storage_isolated_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "ui::grid_tests::latest_storage_probe",
+                "--nocapture",
+            ])
+            .env("PAPKA_STORAGE_TEST_ROOT", dir.path())
+            .env("XDG_CONFIG_HOME", dir.path().join("config"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+    #[test]
+    #[ignore]
+    fn latest_storage_probe() {
+        let root = PathBuf::from(std::env::var_os("PAPKA_STORAGE_TEST_ROOT").unwrap());
+        let pin = root.join("Some-folder");
+        std::fs::create_dir(&pin).unwrap();
+        let mut app = App::default();
+        app.settings.quick_access.clear();
+        app.page = 2;
+        let (bg, rx) = Background::start().unwrap();
+        app.background = Some(bg.clone());
+        for adding in [true, false] {
+            if adding {
+                apply(&mut app, Message::Pin(pin.clone()));
+            } else {
+                apply(&mut app, Message::Unpin(pin.clone()));
+            }
+            let barrier = bg
+                .submit(|_| crate::operations::Completion {
+                    outcome: crate::operations::Outcome::Success,
+                    completed: None,
+                    remaining: None,
+                    undo_available: false,
+                })
+                .unwrap()
+                .id;
+            loop {
+                let e = rx.recv_blocking().unwrap();
+                let done = matches!(e,Event::Finished{id,..}if id==barrier);
+                app.apply(e);
+                if done {
+                    break;
+                }
+            }
+            assert!(app.error.is_none(), "{:?}", app.error);
+            assert_eq!(
+                crate::files::settings_load().unwrap().quick_access,
+                app.settings.quick_access
+            );
+            assert_eq!(app.page, 2);
+            assert!(app.loading.is_none());
+            assert!(pin.is_dir());
+        }
+        bg.shutdown();
+    }
+
+    #[test]
+    fn latest_subscription_delivers_captured_side_buttons() {
+        use iced::futures::{StreamExt, executor::block_on, stream};
+        use iced_futures::subscription::{Event as Input, into_recipes};
+        let app = App::default();
+        // Вторая подписка приложения — фильтр событий; фоновый worker не запускается.
+        let recipe = into_recipes(subscription(&app)).into_iter().nth(1).unwrap();
+        let mut events = Vec::new();
+        for status in [iced::event::Status::Captured, iced::event::Status::Ignored] {
+            for button in [iced::mouse::Button::Back, iced::mouse::Button::Forward] {
+                events.push(Input::Interaction {
+                    window: iced::window::Id::unique(),
+                    event: iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)),
+                    status,
+                });
+            }
+        }
+        events.push(Input::Interaction {
+            window: iced::window::Id::unique(),
+            event: iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            status: iced::event::Status::Captured,
+        });
+        let result: Vec<_> = block_on(recipe.stream(Box::pin(stream::iter(events))).collect());
+        assert_eq!(result.len(), 4);
+        assert!(result.iter().all(|m| matches!(
+            m,
+            Message::Keyboard(iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Back | iced::mouse::Button::Forward
+            )))
+        )));
     }
 }
