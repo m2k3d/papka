@@ -1,11 +1,19 @@
 //! Состояние приложения; правила действий разделены по тематическим модулям.
+#[path = "app/commands.rs"]
 mod commands;
+#[path = "app/dialogs.rs"]
 mod dialogs;
+#[path = "app/events.rs"]
 mod events;
+#[path = "app/navigation.rs"]
 mod navigation;
+#[path = "app/presentation.rs"]
 mod presentation;
+#[path = "app/selection.rs"]
 mod selection;
+#[path = "app/settings.rs"]
 mod settings;
+#[path = "app/state.rs"]
 mod state;
 
 use crate::{
