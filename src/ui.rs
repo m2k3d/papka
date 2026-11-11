@@ -6,8 +6,8 @@ use crate::{
 };
 use iced::futures::{SinkExt, Stream};
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, rule::horizontal as horizontal_rule,
-    scrollable, space, text, text_input,
+    button, checkbox, column, container, mouse_area, pick_list, row,
+    rule::horizontal as horizontal_rule, scrollable, slider, space, stack, text, text_input,
 };
 use iced::{
     Element, Fill, Length, Subscription, Task, Theme,
@@ -25,7 +25,6 @@ enum Message {
     Up,
     Back,
     Forward,
-    Home,
     Refresh,
     Select(PathBuf),
     Open(PathBuf),
@@ -40,6 +39,12 @@ enum Message {
     Dismiss,
     ClearError,
     Settings,
+    Palette,
+    ClosePalette,
+    PaletteCount(u8),
+    PaletteColor(usize, String),
+    Preset([u32; 3]),
+    Navigate(PathBuf),
     History,
     Hidden(bool),
     Dark(bool),
@@ -57,7 +62,8 @@ enum Message {
 pub fn run() -> iced::Result {
     iced::application(App::default, update, view)
         .title("papka")
-        .window_size((1080., 740.))
+        .window_size((1120., 760.))
+        .default_font(iced::Font::with_name("DejaVu Sans"))
         .exit_on_close_request(false)
         .theme(|app: &App| theme(app.settings.dark))
         .subscription(subscription)
@@ -72,12 +78,34 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             app.path_input = path;
             app.path_dirty = true;
         }
-        Message::Go => app.navigate(PathBuf::from(&app.path_input)),
-        Message::Home => {
-            if let Some(path) = dirs::home_dir() {
-                app.navigate(path);
+        Message::Navigate(path) => app.navigate(path),
+        Message::Palette => {
+            app.show_palette = true;
+            app.palette_inputs = app.settings.palette.map(|color| format!("{color:06X}"));
+        }
+        Message::ClosePalette => app.show_palette = false,
+        Message::PaletteCount(count) => {
+            app.settings.palette_count = count.clamp(1, 3);
+            app.save_settings();
+        }
+        Message::PaletteColor(index, value) => {
+            if index < 3 {
+                app.palette_inputs[index] = value.clone();
+                let hex = value.trim().trim_start_matches('#');
+                if hex.len() == 6 {
+                    if let Ok(color) = u32::from_str_radix(hex, 16) {
+                        app.settings.palette[index] = color;
+                        app.save_settings();
+                    }
+                }
             }
         }
+        Message::Preset(colors) => {
+            app.settings.palette = colors;
+            app.palette_inputs = colors.map(|color| format!("{color:06X}"));
+            app.save_settings();
+        }
+        Message::Go => app.navigate(PathBuf::from(&app.path_input)),
         Message::Up => {
             if let Some(path) = app.directory.parent() {
                 app.navigate(path.to_path_buf());
@@ -116,7 +144,10 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::Input(input) => app.input = input,
         Message::Confirm => app.confirm(),
-        Message::Dismiss => app.dialog = None,
+        Message::Dismiss => {
+            app.dialog = None;
+            app.show_palette = false;
+        }
         Message::ClearError => {
             app.error = None;
             app.conflict = None;
@@ -199,6 +230,12 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.selection_shift = modifiers.shift();
             }
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if app.show_palette {
+                    if key == keyboard::Key::Named(Named::Escape) {
+                        app.show_palette = false;
+                    }
+                    return Task::none();
+                }
                 let ctrl = modifiers.control();
                 let shortcut = match key {
                     keyboard::Key::Named(Named::F5) => Some(Message::Refresh),
@@ -339,20 +376,15 @@ fn view(app: &App) -> Element<'_, Message> {
     let idle = ready && app.dialog.is_none() && app.conflict.is_none();
     let selected = !app.selection.is_empty();
     let navigation = row![
-        text("papka").size(26),
-        space().width(12),
         action("←", Message::Back, app.can_back()),
         action("→", Message::Forward, app.can_forward()),
         action("↑", Message::Up, app.directory.parent().is_some()),
-        action("Домой", Message::Home, true),
         text_input("Путь к папке", &app.path_input)
             .id("path")
             .on_input(Message::Path)
             .on_submit(Message::Go)
             .padding(10),
         action("Обновить", Message::Refresh, true),
-        action("История", Message::History, true),
-        action("Настройки", Message::Settings, true),
     ]
     .spacing(4)
     .align_y(iced::Center);
@@ -376,8 +408,20 @@ fn view(app: &App) -> Element<'_, Message> {
         action("В корзину", Message::Trash, selected && idle),
     ]
     .spacing(2)
-    .align_y(iced::Center);
-    let mut content = column![navigation, toolbar, horizontal_rule(1)].spacing(12);
+    .align_y(iced::Center)
+    .wrap();
+    let title = app
+        .directory
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Файловая система".into());
+    let mut content = column![
+        text(title).size(20),
+        navigation,
+        horizontal_rule(1),
+        toolbar
+    ]
+    .spacing(12);
     if let Some(error) = &app.error {
         content = content.push(
             container(
@@ -481,85 +525,71 @@ fn view(app: &App) -> Element<'_, Message> {
     let page_size = 200;
     let pages = visible.len().div_ceil(page_size).max(1);
     let page = app.page.min(pages - 1);
-    let mut list = column![
-        row![
-            text("Имя").width(Fill),
-            text("Размер").width(110),
-            text("Действие").width(100)
-        ]
-        .padding([8, 12]),
-        horizontal_rule(1)
-    ]
-    .spacing(3);
+    let mut cards = row![].spacing(12);
     if visible.is_empty() {
-        list = list.push(
+        cards = cards.push(
             container(
                 text(if app.loading.is_some() {
                     "Чтение каталога…"
                 } else {
                     "Папка пуста"
                 })
-                .size(18),
+                .size(16),
             )
             .padding(32),
         );
     }
     for entry in visible.iter().skip(page * page_size).take(page_size) {
-        let kind = if entry.link {
-            "↗"
-        } else if entry.directory {
-            "▸"
-        } else {
-            "·"
-        };
-        let label = format!("{kind}  {}", entry.name);
         let selected = app.selection.contains(&entry.path);
-        list = list.push(
-            row![
-                button(text(label).size(16).color({
-                    let mut color = theme(app.settings.dark).palette().text;
-                    if !app.settings.reduced_motion {
-                        if let Some(start) = app.transition {
-                            color.a = 0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.);
-                        }
-                    }
-                    color
-                }))
+        let icon = file_icon(entry.directory, entry.link);
+        let card = column![
+            container(icon).center_x(Fill).height(60),
+            text(&entry.name)
+                .size(13)
                 .width(Fill)
-                .padding([10, 12])
+                .align_x(iced::Center)
+                .color({
+                    let opacity = if app.settings.reduced_motion {
+                        1.0
+                    } else {
+                        app.transition.map_or(1.0, |start| {
+                            0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.0)
+                        })
+                    };
+                    theme(app.settings.dark).palette().text.scale_alpha(opacity)
+                }),
+            text(if entry.directory {
+                "Папка".into()
+            } else {
+                size(entry.size)
+            })
+            .size(11)
+            .color(if app.settings.dark {
+                iced::color!(0x9da0ac)
+            } else {
+                iced::color!(0x777985)
+            })
+            .width(Fill)
+            .align_x(iced::Center),
+        ]
+        .spacing(8)
+        .align_x(iced::Center);
+        cards = cards.push(
+            button(card)
+                .width(132)
+                .padding(12)
                 .style(move |theme: &Theme, status| {
                     let mut style = button::text(theme, status);
+                    style.border.radius = 12.into();
                     if selected {
-                        let mut color = theme.palette().primary;
-                        color.a = 0.15;
-                        style.background = Some(color.into());
-                        style.border.radius = 6.into();
+                        style.background = Some(theme.palette().primary.scale_alpha(0.18).into());
                     }
                     style
                 })
-                .on_press(Message::Select(entry.path.clone())),
-                text(if entry.directory {
-                    "—".into()
-                } else {
-                    size(entry.size)
-                })
-                .size(13)
-                .width(110),
-                action(
-                    if entry.directory {
-                        "Войти"
-                    } else {
-                        "Открыть"
-                    },
-                    Message::Open(entry.path.clone()),
-                    idle
-                )
-                .width(100),
-            ]
-            .spacing(8)
-            .align_y(iced::Center),
+                .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
         );
     }
+    let list = cards.wrap().vertical_spacing(14);
     content = content.push(scrollable(list).id("files").height(Fill));
     let mut footer = row![
         text(if app.loading.is_some() {
@@ -583,12 +613,308 @@ fn view(app: &App) -> Element<'_, Message> {
         footer = footer.push(action("Прервать", Message::Stop, true));
     }
     content = content.push(horizontal_rule(1)).push(footer);
-    container(content)
+    let surface = container(content)
         .padding(24)
         .width(Fill)
         .height(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(
+                if app.settings.dark {
+                    iced::color!(0x202127)
+                } else {
+                    iced::color!(0xfafafd)
+                }
+                .into(),
+            ),
+            border: iced::Border {
+                radius: 16.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    let shell = container(row![sidebar(app), surface].spacing(6))
+        .padding(8)
+        .height(Fill)
+        .style(move |_: &Theme| container::Style {
+            background: Some(palette_background(app)),
+            ..Default::default()
+        });
+    if app.show_palette {
+        stack![
+            shell,
+            iced::widget::opaque(
+                container(
+                    mouse_area(container(space()).width(Fill).height(Fill).style(|_| {
+                        container::Style {
+                            background: Some(iced::Color::BLACK.scale_alpha(0.25).into()),
+                            ..Default::default()
+                        }
+                    }))
+                    .on_press(Message::ClosePalette)
+                )
+                .width(Fill)
+                .height(Fill)
+            ),
+            container(iced::widget::opaque(palette_editor(app)))
+                .padding(24)
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::Left)
+                .align_y(iced::Bottom)
+        ]
+        .into()
+    } else {
+        shell.into()
+    }
+}
+
+fn rgb(value: u32) -> iced::Color {
+    iced::Color::from_rgb8((value >> 16) as u8, (value >> 8) as u8, value as u8)
+}
+fn palette_background(app: &App) -> iced::Background {
+    let count = app.settings.palette_count.clamp(1, 3) as usize;
+    let tint = |color| {
+        let c = rgb(color);
+        let base = if app.settings.dark { 0.08 } else { 1.0 };
+        let strength = if app.settings.dark { 0.28 } else { 0.6 };
+        iced::Color::from_rgb(
+            base + (c.r - base) * strength,
+            base + (c.g - base) * strength,
+            base + (c.b - base) * strength,
+        )
+    };
+    if count == 1 {
+        return tint(app.settings.palette[0]).into();
+    }
+    let mut gradient = iced::gradient::Linear::new(iced::Radians(2.2));
+    for i in 0..count {
+        gradient = gradient.add_stop(i as f32 / (count - 1) as f32, tint(app.settings.palette[i]));
+    }
+    iced::Background::Gradient(gradient.into())
+}
+fn sidebar(app: &App) -> Element<'_, Message> {
+    let mut links = column![
+        text("papka").size(25),
+        space().height(20),
+        text("БЫСТРЫЙ ДОСТУП").size(10)
+    ]
+    .spacing(8);
+    for (label, path) in [
+        ("⌂   Главная", dirs::home_dir()),
+        ("▣   Рабочий стол", dirs::desktop_dir()),
+        ("▤   Документы", dirs::document_dir()),
+        ("↓   Загрузки", dirs::download_dir()),
+        ("♫   Музыка", dirs::audio_dir()),
+        ("▧   Изображения", dirs::picture_dir()),
+        ("▷   Видео", dirs::video_dir()),
+    ] {
+        if let Some(path) = path {
+            let active = path == app.directory;
+            links = links.push(
+                button(text(label).size(13))
+                    .width(Fill)
+                    .padding([10, 12])
+                    .style(move |theme: &Theme, status| {
+                        let mut style = button::text(theme, status);
+                        style.border.radius = 9.into();
+                        if active {
+                            style.background = Some(theme.palette().text.scale_alpha(0.09).into());
+                        }
+                        style
+                    })
+                    .on_press(Message::Navigate(path)),
+            );
+        }
+    }
+    links = links
+        .push(space().height(16))
+        .push(text("УСТРОЙСТВА").size(10))
+        .push(
+            action(
+                "▱   Файловая система",
+                Message::Navigate(PathBuf::from("/")),
+                true,
+            )
+            .width(Fill),
+        );
+    let panel = column![
+        scrollable(links).height(Fill),
+        action("История операций", Message::History, true),
+        action("Настройки", Message::Settings, true),
+        action("◉   Цвета оформления", Message::Palette, true)
+    ]
+    .spacing(4);
+    mouse_area(container(panel).padding([22, 12]).width(210).height(Fill))
+        .on_right_press(Message::Palette)
         .into()
 }
+fn file_icon(directory: bool, link: bool) -> Element<'static, Message> {
+    let color = if directory {
+        iced::color!(0xf2c45e)
+    } else {
+        iced::color!(0xb9c8e3)
+    };
+    let tab = container(space())
+        .width(25)
+        .height(8)
+        .style(move |_| container::Style {
+            background: Some(color.into()),
+            border: iced::Border {
+                radius: iced::border::Radius {
+                    top_left: 5.,
+                    top_right: 5.,
+                    bottom_left: 0.,
+                    bottom_right: 0.,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    let body = container(
+        text(if link { "↗" } else { "" })
+            .size(18)
+            .color(iced::color!(0x765c25)),
+    )
+    .width(52)
+    .height(36)
+    .align_x(iced::Right)
+    .align_y(iced::Bottom)
+    .padding(3)
+    .style(move |_| container::Style {
+        background: Some(color.into()),
+        border: iced::Border {
+            radius: iced::border::Radius {
+                top_left: 0.,
+                top_right: 5.,
+                bottom_left: 5.,
+                bottom_right: 5.,
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    if directory {
+        column![tab, body].into()
+    } else {
+        container(body).padding([4, 8]).into()
+    }
+}
+fn palette_editor(app: &App) -> Element<'_, Message> {
+    let mut editor = column![
+        row![
+            text("Цвета оформления").size(20).width(Fill),
+            action("×", Message::ClosePalette, true)
+        ]
+        .align_y(iced::Center),
+        text("Один цвет или плавный градиент").size(12),
+        container(space())
+            .height(64)
+            .width(Fill)
+            .style(move |_| container::Style {
+                background: Some(palette_background(app)),
+                border: iced::Border {
+                    radius: 10.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        row![
+            action("1 цвет", Message::PaletteCount(1), true),
+            action("2 цвета", Message::PaletteCount(2), true),
+            action("3 цвета", Message::PaletteCount(3), true)
+        ]
+        .spacing(4)
+    ]
+    .spacing(14);
+    for index in 0..app.settings.palette_count.clamp(1, 3) as usize {
+        let swatch = rgb(app.settings.palette[index]);
+        editor = editor.push(
+            row![
+                container(space())
+                    .width(28)
+                    .height(28)
+                    .style(move |_| container::Style {
+                        background: Some(swatch.into()),
+                        border: iced::Border {
+                            radius: 7.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                text_input("RRGGBB", &app.palette_inputs[index])
+                    .on_input(move |value| Message::PaletteColor(index, value))
+                    .padding(8)
+            ]
+            .spacing(10),
+        );
+        let color = app.settings.palette[index];
+        for (label, shift) in [("R", 16), ("G", 8), ("B", 0)] {
+            editor = editor.push(
+                row![
+                    text(label).size(11).width(14),
+                    slider(0..=255, ((color >> shift) & 255) as u8, move |value| {
+                        let next = (color & !(255 << shift)) | ((value as u32) << shift);
+                        Message::PaletteColor(index, format!("{next:06X}"))
+                    })
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            );
+        }
+    }
+    editor = editor.push(text("Готовые сочетания").size(12));
+    let mut presets = row![].spacing(8);
+    for colors in [
+        [0xc7c2df, 0xe7c4b5, 0xb8cddd],
+        [0xb6d5c6, 0xdbe1b4, 0xb4ced1],
+        [0xe5b8c8, 0xb7b7e3, 0xa8cadf],
+        [0xb9bec8, 0xd8dce3, 0xc6ccd6],
+    ] {
+        presets = presets.push(
+            button(container(space()).width(48).height(24).style(move |_| {
+                container::Style {
+                    background: Some(iced::Background::Gradient(
+                        iced::gradient::Linear::new(iced::Radians(0.7))
+                            .add_stop(0.0, rgb(colors[0]))
+                            .add_stop(0.5, rgb(colors[1]))
+                            .add_stop(1.0, rgb(colors[2]))
+                            .into(),
+                    )),
+                    border: iced::Border {
+                        radius: 6.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }))
+            .padding(2)
+            .style(button::text)
+            .on_press(Message::Preset(colors)),
+        );
+    }
+    editor = editor
+        .push(presets)
+        .push(
+            checkbox(app.settings.dark)
+                .label("Тёмная тема")
+                .on_toggle(Message::Dark),
+        )
+        .push(
+            text(
+                "HEX: 6 символов. Цвет применяется сразу.
+Esc или щелчок снаружи — закрыть.",
+            )
+            .size(11),
+        );
+    container(scrollable(editor).height(Fill))
+        .padding(22)
+        .width(350)
+        .height(Fill)
+        .max_height(640)
+        .style(container::rounded_box)
+        .into()
+}
+
 fn size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{bytes} Б")
@@ -607,10 +933,10 @@ fn theme(dark: bool) -> Theme {
         Theme::custom(
             "papka",
             iced::theme::Palette {
-                background: iced::color!(0xf5f5f0),
-                text: iced::color!(0x303a35),
-                primary: iced::color!(0x526d5b),
-                success: iced::color!(0x526d5b),
+                background: iced::color!(0xfafafd),
+                text: iced::color!(0x30313a),
+                primary: iced::color!(0x77739f),
+                success: iced::color!(0x77739f),
                 warning: iced::color!(0x947441),
                 danger: iced::color!(0xa0524b),
             },
@@ -620,10 +946,10 @@ fn theme(dark: bool) -> Theme {
         Theme::custom(
             "papka · тёмная",
             iced::theme::Palette {
-                background: iced::color!(0x222824),
-                text: iced::color!(0xe1e6de),
-                primary: iced::color!(0x9bb59e),
-                success: iced::color!(0x9bb59e),
+                background: iced::color!(0x202127),
+                text: iced::color!(0xe7e7ee),
+                primary: iced::color!(0xb7afd8),
+                success: iced::color!(0xb7afd8),
                 warning: iced::color!(0xc4a575),
                 danger: iced::color!(0xd38c81),
             },

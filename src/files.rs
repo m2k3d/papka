@@ -66,6 +66,8 @@ pub struct Settings {
     pub descending: bool,
     pub sort: Sort,
     pub dark: bool,
+    pub palette: [u32; 3],
+    pub palette_count: u8,
     pub reduced_motion: bool,
 }
 impl Default for Settings {
@@ -75,6 +77,8 @@ impl Default for Settings {
             descending: false,
             sort: Sort::Name,
             dark: false,
+            palette: [0xc7c2df, 0xe7c4b5, 0xb8cddd],
+            palette_count: 3,
             reduced_motion: false,
         }
     }
