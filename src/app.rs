@@ -23,6 +23,9 @@ pub struct App {
     pub settings: Settings,
     pub history: Vec<HistoryItem>,
     pub expanded_history: Option<u64>,
+    pub context_menu: Option<(Option<PathBuf>, iced::Point)>,
+    pub pointer: iced::Point,
+    pub show_path: bool,
     pub show_settings: bool,
     pub show_palette: bool,
     pub palette_inputs: [String; 3],
@@ -73,6 +76,9 @@ impl Default for App {
             settings: Settings::default(),
             history: vec![],
             expanded_history: None,
+            context_menu: None,
+            pointer: iced::Point::ORIGIN,
+            show_path: false,
             show_settings: false,
             show_palette: false,
             palette_inputs: Default::default(),
@@ -348,6 +354,16 @@ impl App {
             .iter()
             .filter(|e| self.settings.hidden || !e.hidden)
             .collect()
+    }
+    /// Правый клик сохраняет множественное выделение и не считается двойным щелчком.
+    pub fn select_context(&mut self, path: PathBuf) {
+        self.last_click = None;
+        if !self.selection.contains(&path) {
+            self.selection.clear();
+            self.selection.insert(path.clone());
+        }
+        self.anchor = Some(path.clone());
+        self.cursor = Some(path);
     }
     pub fn select(&mut self, path: PathBuf) {
         if self.dialog.is_some() {

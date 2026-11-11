@@ -17,6 +17,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 enum Message {
+    Context(Option<PathBuf>),
+    CloseContext,
+    MenuAction(Box<Message>),
+    EditPath,
+    ClosePath,
+    CopyPath,
+    CopySelection(bool),
+    Paste,
     Ready(Background),
     Event(Event),
     Failed(String),
@@ -71,6 +79,51 @@ pub fn run() -> iced::Result {
 }
 fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        Message::Context(target) => {
+            if app.dialog.is_some() || app.conflict.is_some() || app.show_path || app.show_palette {
+                return Task::none();
+            }
+            if let Some(path) = &target {
+                app.select_context(path.clone());
+            }
+            app.context_menu = Some((target, app.pointer));
+        }
+        Message::CloseContext => app.context_menu = None,
+        Message::MenuAction(action) => {
+            app.context_menu = None;
+            return update(app, *action);
+        }
+        Message::EditPath => {
+            app.context_menu = None;
+            app.show_path = true;
+            app.path_input = app.directory.to_string_lossy().into_owned();
+            app.path_dirty = false;
+            return iced::widget::operation::focus("path");
+        }
+        Message::ClosePath => {
+            app.show_path = false;
+            app.path_dirty = false;
+        }
+        Message::CopyPath => {
+            return iced::clipboard::write(app.directory.to_string_lossy().into_owned());
+        }
+        Message::CopySelection(moving) => {
+            if app.dialog.is_none() {
+                app.clipboard = Some((app.selected(), moving));
+            }
+        }
+        Message::Paste => {
+            if app.dialog.is_none() {
+                if let Some((paths, moving)) = app.clipboard.clone() {
+                    let directory = app.directory.clone();
+                    app.execute(if moving {
+                        Command::Move(paths, directory)
+                    } else {
+                        Command::Copy(paths, directory)
+                    });
+                }
+            }
+        }
         Message::Ready(background) => app.ready(background),
         Message::Event(event) => app.apply(event),
         Message::Failed(error) => app.error = Some(error),
@@ -105,7 +158,10 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             app.palette_inputs = colors.map(|color| format!("{color:06X}"));
             app.save_settings();
         }
-        Message::Go => app.navigate(PathBuf::from(&app.path_input)),
+        Message::Go => {
+            app.show_path = false;
+            app.navigate(PathBuf::from(&app.path_input));
+        }
         Message::Up => {
             if let Some(path) = app.directory.parent() {
                 app.navigate(path.to_path_buf());
@@ -147,6 +203,8 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::Dismiss => {
             app.dialog = None;
             app.show_palette = false;
+            app.show_path = false;
+            app.context_menu = None;
         }
         Message::ClearError => {
             app.error = None;
@@ -218,6 +276,9 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         Message::Keyboard(event) => match event {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                app.pointer = position
+            }
             iced::Event::Window(iced::window::Event::CloseRequested) => {
                 app.closing = true;
                 if let Some(ticket) = &app.mutation {
@@ -230,6 +291,18 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                 app.selection_shift = modifiers.shift();
             }
             iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if app.context_menu.is_some() {
+                    if key == keyboard::Key::Named(Named::Escape) {
+                        app.context_menu = None;
+                    }
+                    return Task::none();
+                }
+                if app.show_path {
+                    if key == keyboard::Key::Named(Named::Escape) {
+                        return update(app, Message::ClosePath);
+                    }
+                    return Task::none();
+                }
                 if app.show_palette {
                     if key == keyboard::Key::Named(Named::Escape) {
                         app.show_palette = false;
@@ -269,27 +342,17 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
                         None
                     }
                     keyboard::Key::Character(c) if ctrl => match c.as_str() {
-                        "l" => return iced::widget::operation::focus("path"),
+                        "l" => return update(app, Message::EditPath),
+                        "r" => Some(Message::Refresh),
                         "h" => Some(Message::Hidden(!app.settings.hidden)),
                         "a" if app.dialog.is_none() => {
                             app.selection = app.visible().iter().map(|e| e.path.clone()).collect();
                             None
                         }
                         "c" | "x" if app.dialog.is_none() => {
-                            app.clipboard = Some((app.selected(), c.as_str() == "x"));
-                            None
+                            Some(Message::CopySelection(c.as_str() == "x"))
                         }
-                        "v" if app.dialog.is_none() => {
-                            if let Some((paths, moving)) = app.clipboard.clone() {
-                                let directory = app.directory.clone();
-                                app.execute(if moving {
-                                    Command::Move(paths, directory)
-                                } else {
-                                    Command::Copy(paths, directory)
-                                });
-                            }
-                            None
-                        }
+                        "v" if app.dialog.is_none() => Some(Message::Paste),
                         "z" if app.dialog.is_none() => app
                             .history
                             .iter()
@@ -318,7 +381,8 @@ fn subscription(app: &App) -> Subscription<Message> {
         iced::event::listen_with(|event, status, _| {
             if matches!(
                 event,
-                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(_))
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { .. })
+                    | iced::Event::Keyboard(keyboard::Event::ModifiersChanged(_))
                     | iced::Event::Window(iced::window::Event::CloseRequested)
             ) || status == iced::event::Status::Ignored
             {
@@ -374,54 +438,12 @@ fn action<'a>(
 fn view(app: &App) -> Element<'_, Message> {
     let ready = app.mutation.is_none() && !app.closing;
     let idle = ready && app.dialog.is_none() && app.conflict.is_none();
-    let selected = !app.selection.is_empty();
-    let navigation = row![
-        action("←", Message::Back, app.can_back()),
-        action("→", Message::Forward, app.can_forward()),
-        action("↑", Message::Up, app.directory.parent().is_some()),
-        text_input("Путь к папке", &app.path_input)
-            .id("path")
-            .on_input(Message::Path)
-            .on_submit(Message::Go)
-            .padding(10),
-        action("Обновить", Message::Refresh, true),
-    ]
-    .spacing(4)
-    .align_y(iced::Center);
-    let toolbar = row![
-        action("+ Файл", Message::Create(false), idle),
-        action("+ Папка", Message::Create(true), idle),
-        action(
-            "Открыть",
-            app.selection
-                .first()
-                .map_or(Message::Refresh, |p| Message::Open(p.clone())),
-            selected && idle
-        ),
-        action("Копировать…", Message::Transfer(false), selected && idle),
-        action("Переместить…", Message::Transfer(true), selected && idle),
-        action(
-            "Переименовать",
-            Message::Rename,
-            app.selection.len() == 1 && idle
-        ),
-        action("В корзину", Message::Trash, selected && idle),
-    ]
-    .spacing(2)
-    .align_y(iced::Center)
-    .wrap();
     let title = app
         .directory
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Файловая система".into());
-    let mut content = column![
-        text(title).size(20),
-        navigation,
-        horizontal_rule(1),
-        toolbar
-    ]
-    .spacing(12);
+    let mut content = column![text(title).size(20), horizontal_rule(1)].spacing(18);
     if let Some(error) = &app.error {
         content = content.push(
             container(
@@ -575,18 +597,22 @@ fn view(app: &App) -> Element<'_, Message> {
         .spacing(8)
         .align_x(iced::Center);
         cards = cards.push(
-            button(card)
-                .width(132)
-                .padding(12)
-                .style(move |theme: &Theme, status| {
-                    let mut style = button::text(theme, status);
-                    style.border.radius = 12.into();
-                    if selected {
-                        style.background = Some(theme.palette().primary.scale_alpha(0.18).into());
-                    }
-                    style
-                })
-                .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
+            mouse_area(
+                button(card)
+                    .width(132)
+                    .padding(12)
+                    .style(move |theme: &Theme, status| {
+                        let mut style = button::text(theme, status);
+                        style.border.radius = 12.into();
+                        if selected {
+                            style.background =
+                                Some(theme.palette().primary.scale_alpha(0.18).into());
+                        }
+                        style
+                    })
+                    .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
+            )
+            .on_right_press(Message::Context(Some(entry.path.clone()))),
         );
     }
     let list = cards.wrap().vertical_spacing(14);
@@ -613,25 +639,28 @@ fn view(app: &App) -> Element<'_, Message> {
         footer = footer.push(action("Прервать", Message::Stop, true));
     }
     content = content.push(horizontal_rule(1)).push(footer);
-    let surface = container(content)
-        .padding(24)
-        .width(Fill)
-        .height(Fill)
-        .style(|_: &Theme| container::Style {
-            background: Some(
-                if app.settings.dark {
-                    iced::color!(0x202127)
-                } else {
-                    iced::color!(0xfafafd)
-                }
-                .into(),
-            ),
-            border: iced::Border {
-                radius: 16.into(),
+    let surface = mouse_area(
+        container(content)
+            .padding(24)
+            .width(Fill)
+            .height(Fill)
+            .style(|_: &Theme| container::Style {
+                background: Some(
+                    if app.settings.dark {
+                        iced::color!(0x202127)
+                    } else {
+                        iced::color!(0xfafafd)
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    radius: 16.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        });
+            }),
+    );
+    let surface = surface.on_right_press(Message::Context(None));
     let shell = container(row![sidebar(app), surface].spacing(6))
         .padding(8)
         .height(Fill)
@@ -642,19 +671,7 @@ fn view(app: &App) -> Element<'_, Message> {
     if app.show_palette {
         stack![
             shell,
-            iced::widget::opaque(
-                container(
-                    mouse_area(container(space()).width(Fill).height(Fill).style(|_| {
-                        container::Style {
-                            background: Some(iced::Color::BLACK.scale_alpha(0.25).into()),
-                            ..Default::default()
-                        }
-                    }))
-                    .on_press(Message::ClosePalette)
-                )
-                .width(Fill)
-                .height(Fill)
-            ),
+            backdrop(Message::ClosePalette, true),
             container(iced::widget::opaque(palette_editor(app)))
                 .padding(24)
                 .width(Fill)
@@ -663,8 +680,157 @@ fn view(app: &App) -> Element<'_, Message> {
                 .align_y(iced::Bottom)
         ]
         .into()
+    } else if app.show_path {
+        let editor = container(
+            column![
+                row![
+                    text("Текущий путь").size(20).width(Fill),
+                    action("×", Message::ClosePath, true)
+                ],
+                text_input("Путь к папке", &app.path_input)
+                    .id("path")
+                    .on_input(Message::Path)
+                    .on_submit(Message::Go)
+                    .padding(12),
+                row![
+                    action("Копировать полный путь", Message::CopyPath, true),
+                    action("Перейти", Message::Go, true)
+                ]
+                .spacing(8)
+                .wrap(),
+            ]
+            .spacing(16),
+        )
+        .padding(20)
+        .width(560)
+        .style(container::rounded_box);
+        stack![
+            shell,
+            backdrop(Message::ClosePath, true),
+            container(iced::widget::opaque(editor))
+                .padding(24)
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::Left)
+                .align_y(iced::Top)
+        ]
+        .into()
+    } else if let Some((target, position)) = &app.context_menu {
+        let target = target.clone();
+        let position = *position;
+        let overlay = iced::widget::responsive(move |size| {
+            let width = 240.0_f32.min((size.width - 16.0).max(1.0));
+            let max_height = (size.height - 16.0).max(1.0);
+            let height = if target.is_some() {
+                330.0_f32
+            } else {
+                270.0_f32
+            }
+            .min(max_height);
+            let menu = context_menu(app, target.as_ref(), idle);
+            container(iced::widget::opaque(
+                container(scrollable(menu))
+                    .padding(6)
+                    .width(width)
+                    .max_height(height)
+                    .style(container::rounded_box),
+            ))
+            .padding(iced::Padding {
+                left: position.x.clamp(8.0, (size.width - width - 8.0).max(8.0)),
+                top: position.y.clamp(8.0, (size.height - height - 8.0).max(8.0)),
+                right: 0.0,
+                bottom: 0.0,
+            })
+            .width(Fill)
+            .height(Fill)
+            .into()
+        });
+        stack![shell, backdrop(Message::CloseContext, false), overlay].into()
     } else {
         shell.into()
+    }
+}
+
+fn backdrop(message: Message, dim: bool) -> Element<'static, Message> {
+    iced::widget::opaque(
+        mouse_area(
+            container(space())
+                .width(Fill)
+                .height(Fill)
+                .style(move |_| container::Style {
+                    background: dim.then(|| iced::Color::BLACK.scale_alpha(0.25).into()),
+                    ..Default::default()
+                }),
+        )
+        .on_press(message.clone())
+        .on_right_press(message),
+    )
+}
+fn context_menu<'a>(
+    app: &'a App,
+    target: Option<&PathBuf>,
+    idle: bool,
+) -> iced::widget::Column<'a, Message> {
+    let item = |label, message, enabled| {
+        action(label, Message::MenuAction(Box::new(message)), enabled).width(Fill)
+    };
+    let mut menu = column![].spacing(2);
+    if let Some(path) = target {
+        menu = menu
+            .push(item("Открыть", Message::Open(path.clone()), idle))
+            .push(horizontal_rule(1))
+            .push(item("Копировать", Message::CopySelection(false), idle))
+            .push(item("Вырезать", Message::CopySelection(true), idle))
+            .push(item("Копировать в…", Message::Transfer(false), idle))
+            .push(item("Переместить в…", Message::Transfer(true), idle))
+            .push(item(
+                "Переименовать",
+                Message::Rename,
+                idle && app.selection.len() == 1,
+            ))
+            .push(horizontal_rule(1))
+            .push(item("В корзину", Message::Trash, idle));
+    } else {
+        menu = menu
+            .push(item("Создать папку", Message::Create(true), idle))
+            .push(item("Создать файл", Message::Create(false), idle))
+            .push(item(
+                "Вставить",
+                Message::Paste,
+                idle && app
+                    .clipboard
+                    .as_ref()
+                    .is_some_and(|(paths, _)| !paths.is_empty()),
+            ))
+            .push(horizontal_rule(1));
+    }
+    menu.push(item("Настройки", Message::Settings, true))
+        .push(item("Цвета оформления", Message::Palette, true))
+}
+fn short_path(path: &std::path::Path, budget: usize) -> String {
+    let full = path.to_string_lossy();
+    let display = dirs::home_dir()
+        .and_then(|home| path.strip_prefix(home).ok())
+        .map(|relative| {
+            if relative.as_os_str().is_empty() {
+                "~".into()
+            } else {
+                format!("~/{}", relative.display())
+            }
+        })
+        .unwrap_or_else(|| full.into_owned());
+    let chars: Vec<_> = display.chars().collect();
+    let budget = budget.max(3);
+    if chars.len() <= budget {
+        display
+    } else {
+        format!(
+            "{}…{}",
+            chars[..(budget / 3)].iter().collect::<String>(),
+            chars[chars.len() - (budget - budget / 3 - 1)..]
+                .iter()
+                .collect::<String>()
+        )
     }
 }
 
@@ -694,8 +860,28 @@ fn palette_background(app: &App) -> iced::Background {
 }
 fn sidebar(app: &App) -> Element<'_, Message> {
     let mut links = column![
-        text("papka").size(25),
-        space().height(20),
+        iced::widget::responsive(move |size| {
+            // Консервативный бюджет учитывает широкие символы и внутренние отступы.
+            let budget = ((size.width - 8.0) / 13.0).floor().max(3.0) as usize;
+            button(
+                text(short_path(&app.directory, budget))
+                    .size(13)
+                    .wrapping(text::Wrapping::None),
+            )
+            .padding([10, 4])
+            .width(Fill)
+            .style(button::text)
+            .on_press(Message::EditPath)
+            .into()
+        })
+        .height(40),
+        row![
+            action("←", Message::Back, app.can_back()),
+            action("→", Message::Forward, app.can_forward()),
+            action("↑", Message::Up, app.directory.parent().is_some())
+        ]
+        .spacing(2),
+        space().height(12),
         text("БЫСТРЫЙ ДОСТУП").size(10)
     ]
     .spacing(8);
@@ -739,13 +925,13 @@ fn sidebar(app: &App) -> Element<'_, Message> {
         );
     let panel = column![
         scrollable(links).height(Fill),
-        action("История операций", Message::History, true),
+        action("История", Message::History, true),
         action("Настройки", Message::Settings, true),
         action("◉   Цвета оформления", Message::Palette, true)
     ]
     .spacing(4);
     mouse_area(container(panel).padding([22, 12]).width(210).height(Fill))
-        .on_right_press(Message::Palette)
+        .on_right_press(Message::Context(None))
         .into()
 }
 fn file_icon(directory: bool, link: bool) -> Element<'static, Message> {
