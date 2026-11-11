@@ -14,6 +14,9 @@ mod grid_tests {
         names: Vec<(String, Rectangle)>,
         scrolls: Vec<(Rectangle, Rectangle)>,
         labels: Vec<String>,
+        texts: Vec<(String, Rectangle)>,
+        icons: Vec<(Rectangle, Option<iced::Color>)>,
+        surfaces: Vec<(Rectangle, f32)>,
     }
     impl Operation for Geometry {
         fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
@@ -21,6 +24,7 @@ mod grid_tests {
         }
         fn text(&mut self, _: Option<&Id>, bounds: Rectangle, value: &str) {
             self.labels.push(value.into());
+            self.texts.push((value.into(), bounds));
             if value.starts_with("grid-") {
                 self.names.push((value.into(), bounds));
             }
@@ -130,7 +134,17 @@ mod grid_tests {
         let mut thumbs = Vec::new();
         if let iced::Renderer::Secondary(r) = &mut renderer {
             for layer in r.layers() {
+                for image in &layer.images {
+                    if let iced_graphics::Image::Vector { svg, bounds, .. } = image {
+                        geometry.icons.push((*bounds, svg.color));
+                    }
+                }
                 for (quad, background) in &layer.quads {
+                    if quad.bounds.width > 300. && quad.bounds.height > 300. {
+                        geometry
+                            .surfaces
+                            .push((quad.bounds, quad.border.radius.top_left));
+                    }
                     if quad.bounds.x > 200. && (quad.bounds.width - 5.).abs() < 0.1 {
                         if let iced::Background::Color(color) = background {
                             thumbs.push((quad.bounds, color.a));
@@ -171,14 +185,14 @@ mod grid_tests {
         let right = first.last().unwrap().x + first.last().unwrap().width + 12.;
         approx(left, scroll.x);
         approx(right, scroll.x + scroll.width);
-        approx(scroll.x + scroll.width, 1120. - 12.);
+        approx(scroll.x + scroll.width, 1120. - 32.);
     }
     #[test]
     fn resizing_changes_spacing_and_wraps_columns() {
         let (_dir, app) = sample(12);
         let (a, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
-        let (b, _, _) = inspect(&app, Size::new(1180., 760.), &[]);
-        let (c, _, _) = inspect(&app, Size::new(1000., 760.), &[]);
+        let (b, _, _) = inspect(&app, Size::new(1130., 760.), &[]);
+        let (c, _, _) = inspect(&app, Size::new(950., 760.), &[]);
         let a = first_row(&a);
         let b = first_row(&b);
         let c = first_row(&c);
@@ -233,6 +247,8 @@ mod grid_tests {
             iced_futures::subscription::into_recipes(subscription(&app)).len(),
             baseline + 1
         );
+        // Время отрисовки не должно переводить проверку через границу таймера.
+        app.last_file_scroll = Some(Instant::now());
         apply(&mut app, Message::Frame);
         assert!(app.last_file_scroll.is_some());
         app.last_file_scroll = Some(Instant::now() - Duration::from_millis(1100));
@@ -305,5 +321,167 @@ mod grid_tests {
         assert!(g.labels.iter().any(|s| s == "Настройки"));
         apply(&mut app, Message::MenuAction(Box::new(Message::Settings)));
         assert!(app.show_settings && app.context_menu.is_none());
+    }
+    #[test]
+    fn polish_footer_and_grid_have_equal_panel_insets() {
+        let (_dir, mut app) = sample(80);
+        for size in [
+            Size::new(1120., 760.),
+            Size::new(1000., 600.),
+            Size::new(650., 500.),
+        ] {
+            for dark in [false, true] {
+                app.settings.dark = dark;
+                let (g, _, _) = inspect(&app, size, &[]);
+                let (surface, radius) = g.surfaces.iter().find(|(r, _)| r.x > 200.).unwrap();
+                approx(*radius, 6.);
+                let left = g
+                    .texts
+                    .iter()
+                    .find(|(s, _)| s.starts_with("Элементов:"))
+                    .unwrap()
+                    .1;
+                let right = g
+                    .texts
+                    .iter()
+                    .find(|(s, _)| s.starts_with("Выделено:"))
+                    .unwrap()
+                    .1;
+                approx(left.x - surface.x, 24.);
+                approx(surface.x + surface.width - right.x - right.width, 24.);
+                let first = first_row(&g);
+                approx(first[0].x - 12., left.x);
+                let last = first.last().unwrap();
+                approx(last.x + last.width + 12., right.x + right.width);
+            }
+        }
+    }
+    #[test]
+    fn polish_sidebar_icons_use_fixed_slots_and_theme_color() {
+        let (_dir, mut app) = sample(0);
+        for dark in [false, true] {
+            app.settings.dark = dark;
+            let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
+            assert!(g.icons.len() >= 7, "SVG не попали в draw: {:?}", g.icons);
+            for (index, (bounds, color)) in g.icons.iter().enumerate() {
+                approx(bounds.width, 20.);
+                approx(bounds.height, 20.);
+                if index >= 3 {
+                    assert_eq!(*color, Some(theme(dark).palette().text));
+                }
+            }
+        }
+    }
+    #[test]
+    fn polish_sidebar_tools_dispatch_and_disabled_back_is_inert() {
+        let (_dir, app) = sample(0);
+        let size = Size::new(1120., 760.);
+        let click = |p| {
+            vec![
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+                (
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )),
+                    p,
+                ),
+            ]
+        };
+        let (g, _, _) = inspect(&app, size, &[]);
+        let at = |r: Rectangle| Point::new(r.center_x(), r.center_y());
+        let icons = &g.icons;
+        let (_, _, messages) = inspect(&app, size, &click(at(icons[0].0)));
+        assert!(!messages.iter().any(|m| matches!(m, Message::Back)));
+        let (_, _, messages) = inspect(&app, size, &click(at(icons[icons.len() - 2].0)));
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::History)),
+            "{messages:?}"
+        );
+        let (_, _, messages) = inspect(&app, size, &click(at(icons[icons.len() - 1].0)));
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::Palette)),
+            "{messages:?}"
+        );
+        let path = g
+            .texts
+            .iter()
+            .find(|(_, r)| r.x < 200. && r.y < 120.)
+            .unwrap();
+        let (_, _, messages) = inspect(&app, size, &click(at(path.1)));
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::EditPath)),
+            "{messages:?}"
+        );
+    }
+    #[test]
+    fn polish_completion_clears_success_but_preserves_failure_and_interruption() {
+        use crate::operations::{Completion, Outcome};
+        for outcome in [
+            Outcome::Success,
+            Outcome::Interrupted,
+            Outcome::Failed("Ошибка проверки".into()),
+        ] {
+            let (_dir, mut app) = sample(3);
+            let (background, receiver) = Background::start().unwrap();
+            let result = Completion {
+                outcome: outcome.clone(),
+                completed: Some(2),
+                remaining: Some(1),
+                undo_available: true,
+            };
+            let ticket = background.submit(move |_| result).unwrap();
+            app.mutation = Some(ticket);
+            app.status = "Выполняется…".into();
+            app.operation_notice = Some("Старое уведомление".into());
+            loop {
+                let event = receiver.recv_blocking().unwrap();
+                let finished = matches!(event, Event::Finished { .. });
+                app.apply(event);
+                if finished {
+                    break;
+                }
+            }
+            background.shutdown();
+            match outcome {
+                Outcome::Success => {
+                    assert_eq!(app.status, "Элементов: 3");
+                    assert!(app.operation_notice.is_none());
+                }
+                Outcome::Interrupted => assert!(
+                    app.operation_notice
+                        .as_ref()
+                        .unwrap()
+                        .contains("Прерывание завершено")
+                ),
+                Outcome::Failed(_) => {
+                    assert_eq!(app.error.as_deref(), Some("Ошибка проверки"));
+                    assert!(
+                        app.operation_notice
+                            .as_ref()
+                            .unwrap()
+                            .contains("не завершена полностью")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn polish_disabled_navigation_has_visually_dimmed_icon() {
+        let (_dir, app) = sample(0);
+        assert!(!app.can_back());
+        assert!(app.directory.parent().is_some());
+        let (g, _, _) = inspect(&app, Size::new(1120., 760.), &[]);
+        let disabled = g.icons[0].1.unwrap();
+        let enabled = g.icons[2].1.unwrap();
+        assert!(
+            disabled.a < enabled.a,
+            "Недоступная «Назад» должна быть приглушена относительно доступной «Вверх»: {disabled:?} / {enabled:?}"
+        );
     }
 }
