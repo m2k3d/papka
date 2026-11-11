@@ -63,6 +63,7 @@ enum Message {
     Keyboard(iced::Event),
     Tick,
     Frame,
+    FilesScrolled,
     Page(bool),
     Acknowledge(u64),
     ResolveConflict,
@@ -258,7 +259,14 @@ fn update(app: &mut App, message: Message) -> Task<Message> {
             }
         }
         Message::Acknowledge(id) => app.execute(Command::Acknowledge(id)),
+        Message::FilesScrolled => app.last_file_scroll = Some(std::time::Instant::now()),
         Message::Frame => {
+            if app
+                .last_file_scroll
+                .is_some_and(|t| t.elapsed().as_millis() >= 1000)
+            {
+                app.last_file_scroll = None;
+            }
             if app
                 .transition
                 .is_some_and(|t| t.elapsed().as_millis() >= 180)
@@ -392,7 +400,9 @@ fn subscription(app: &App) -> Subscription<Message> {
             }
         }),
         iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::Tick),
-        if app.transition.is_some() && !app.settings.reduced_motion {
+        if (app.transition.is_some() && !app.settings.reduced_motion)
+            || app.last_file_scroll.is_some()
+        {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame)
         } else {
             Subscription::none()
@@ -547,76 +557,140 @@ fn view(app: &App) -> Element<'_, Message> {
     let page_size = 200;
     let pages = visible.len().div_ceil(page_size).max(1);
     let page = app.page.min(pages - 1);
-    let mut cards = row![].spacing(12);
-    if visible.is_empty() {
-        cards = cards.push(
-            container(
-                text(if app.loading.is_some() {
-                    "Чтение каталога…"
-                } else {
-                    "Папка пуста"
-                })
-                .size(16),
-            )
-            .padding(32),
-        );
-    }
-    for entry in visible.iter().skip(page * page_size).take(page_size) {
-        let selected = app.selection.contains(&entry.path);
-        let icon = file_icon(entry.directory, entry.link);
-        let card = column![
-            container(icon).center_x(Fill).height(60),
-            text(&entry.name)
-                .size(13)
-                .width(Fill)
-                .align_x(iced::Center)
-                .color({
-                    let opacity = if app.settings.reduced_motion {
-                        1.0
+    let grid = iced::widget::responsive(move |bounds| {
+        let gap = 12.0;
+        let columns = ((bounds.width + gap) / (132.0 + gap)).floor().max(1.0) as usize;
+        let mut rows = column![].spacing(14).width(Fill);
+        let mut cards = row![].spacing(gap).width(Fill);
+        if visible.is_empty() {
+            cards = cards.push(
+                container(
+                    text(if app.loading.is_some() {
+                        "Чтение каталога…"
                     } else {
-                        app.transition.map_or(1.0, |start| {
-                            0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.0)
-                        })
-                    };
-                    theme(app.settings.dark).palette().text.scale_alpha(opacity)
-                }),
-            text(if entry.directory {
-                "Папка".into()
-            } else {
-                size(entry.size)
-            })
-            .size(11)
-            .color(if app.settings.dark {
-                iced::color!(0x9da0ac)
-            } else {
-                iced::color!(0x777985)
-            })
-            .width(Fill)
-            .align_x(iced::Center),
-        ]
-        .spacing(8)
-        .align_x(iced::Center);
-        cards = cards.push(
-            mouse_area(
-                button(card)
-                    .width(132)
-                    .padding(12)
-                    .style(move |theme: &Theme, status| {
-                        let mut style = button::text(theme, status);
-                        style.border.radius = 12.into();
-                        if selected {
-                            style.background =
-                                Some(theme.palette().primary.scale_alpha(0.18).into());
-                        }
-                        style
+                        "Папка пуста"
                     })
-                    .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
-            )
-            .on_right_press(Message::Context(Some(entry.path.clone()))),
-        );
-    }
-    let list = cards.wrap().vertical_spacing(14);
-    content = content.push(scrollable(list).id("files").height(Fill));
+                    .size(16),
+                )
+                .padding(32),
+            );
+        }
+        let entries = visible.iter().skip(page * page_size).take(page_size);
+        let count = entries.len();
+        for (index, entry) in entries.enumerate() {
+            let selected = app.selection.contains(&entry.path);
+            let icon = file_icon(entry.directory, entry.link);
+            let card = column![
+                container(icon).center_x(Fill).height(60),
+                text(&entry.name)
+                    .size(13)
+                    .width(Fill)
+                    .align_x(iced::Center)
+                    .color({
+                        let opacity = if app.settings.reduced_motion {
+                            1.0
+                        } else {
+                            app.transition.map_or(1.0, |start| {
+                                0.65 + 0.35 * (start.elapsed().as_secs_f32() / 0.18).min(1.0)
+                            })
+                        };
+                        theme(app.settings.dark).palette().text.scale_alpha(opacity)
+                    }),
+                text(if entry.directory {
+                    "Папка".into()
+                } else {
+                    size(entry.size)
+                })
+                .size(11)
+                .color(if app.settings.dark {
+                    iced::color!(0x9da0ac)
+                } else {
+                    iced::color!(0x777985)
+                })
+                .width(Fill)
+                .align_x(iced::Center),
+            ]
+            .spacing(8)
+            .align_x(iced::Center);
+            cards = cards.push(
+                mouse_area(
+                    button(card)
+                        .width(Fill)
+                        .padding(12)
+                        .style(move |theme: &Theme, status| {
+                            let mut style = button::text(theme, status);
+                            style.border.radius = 12.into();
+                            if selected {
+                                style.background =
+                                    Some(theme.palette().primary.scale_alpha(0.18).into());
+                            }
+                            style
+                        })
+                        .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
+                )
+                .on_right_press(Message::Context(Some(entry.path.clone()))),
+            );
+            if (index + 1) % columns == 0 {
+                rows = rows.push(cards);
+                cards = row![].spacing(gap).width(Fill);
+            }
+        }
+        if count == 0 {
+            rows = rows.push(cards);
+        } else if count % columns != 0 {
+            // Неполный ряд сохраняет ширину столбцов остальных рядов.
+            for _ in count % columns..columns {
+                cards = cards.push(space().width(Fill));
+            }
+            rows = rows.push(cards);
+        }
+        rows.into()
+    })
+    .height(Length::Shrink);
+    let scroll_opacity = app.last_file_scroll.map_or(0.0, |start| {
+        let elapsed = start.elapsed().as_secs_f32();
+        if app.settings.reduced_motion {
+            if elapsed < 1.0 { 1.0 } else { 0.0 }
+        } else {
+            ((1.0 - elapsed) / 0.2).clamp(0.0, 1.0)
+        }
+    });
+    content = content.push(
+        scrollable(grid)
+            .id("files")
+            .width(Fill)
+            .height(Fill)
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(5)
+                    .scroller_width(5)
+                    .margin(0),
+            ))
+            .on_scroll(|_| Message::FilesScrolled)
+            .style(move |theme: &Theme, status| {
+                let mut style = scrollable::default(theme, status);
+                let opacity = if matches!(
+                    status,
+                    scrollable::Status::Dragged {
+                        is_vertical_scrollbar_dragged: true,
+                        ..
+                    }
+                ) {
+                    1.0
+                } else {
+                    scroll_opacity
+                };
+                style.vertical_rail.background = None;
+                style.vertical_rail.border = iced::Border::default();
+                style.vertical_rail.scroller.background =
+                    theme.palette().text.scale_alpha(0.35 * opacity).into();
+                style.vertical_rail.scroller.border = iced::Border {
+                    radius: 3.into(),
+                    ..Default::default()
+                };
+                style
+            }),
+    );
     let mut footer = row![
         text(if app.loading.is_some() {
             "Обновление…"
@@ -641,7 +715,12 @@ fn view(app: &App) -> Element<'_, Message> {
     content = content.push(horizontal_rule(1)).push(footer);
     let surface = mouse_area(
         container(content)
-            .padding(24)
+            .padding(iced::Padding {
+                top: 24.0,
+                right: 4.0,
+                bottom: 16.0,
+                left: 24.0,
+            })
             .width(Fill)
             .height(Fill)
             .style(|_: &Theme| container::Style {
@@ -926,7 +1005,6 @@ fn sidebar(app: &App) -> Element<'_, Message> {
     let panel = column![
         scrollable(links).height(Fill),
         action("История", Message::History, true),
-        action("Настройки", Message::Settings, true),
         action("◉   Цвета оформления", Message::Palette, true)
     ]
     .spacing(4);

@@ -50,6 +50,7 @@ pub struct App {
     auxiliary: BTreeSet<u64>,
     history_direction: i8,
     pub transition: Option<std::time::Instant>,
+    pub last_file_scroll: Option<std::time::Instant>,
     last_click: Option<(PathBuf, std::time::Instant)>,
     pub clipboard: Option<(Vec<PathBuf>, bool)>,
 }
@@ -103,6 +104,7 @@ impl Default for App {
             auxiliary: BTreeSet::new(),
             history_direction: 0,
             transition: None,
+            last_file_scroll: None,
             last_click: None,
             clipboard: None,
         }
