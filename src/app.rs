@@ -294,6 +294,7 @@ impl App {
                     .zip(completion.remaining)
                     .map(|(done, left)| format!("Обработано: {done}; осталось: {left}. "))
                     .unwrap_or_default();
+                let succeeded = matches!(&completion.outcome, Outcome::Success);
                 match completion.outcome {
                     Outcome::Failed(error) => {
                         if read {
@@ -308,14 +309,17 @@ impl App {
                     Outcome::Interrupted if mutation => {
                         self.status = format!("{counts}Прерывание завершено. Проверьте историю.")
                     }
-                    Outcome::Success if mutation => self.status = format!("{counts}Готово"),
+                    Outcome::Success if mutation => {
+                        self.status = format!("Элементов: {}", self.entries.len());
+                        self.operation_notice = None;
+                    }
                     Outcome::Success if read && self.read_error => {
                         self.error = None;
                         self.read_error = false;
                     }
                     _ => {}
                 }
-                if mutation {
+                if mutation && !succeeded {
                     self.operation_notice = Some(self.status.clone());
                 }
             }

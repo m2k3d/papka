@@ -717,7 +717,7 @@ fn view(app: &App) -> Element<'_, Message> {
         container(content)
             .padding(iced::Padding {
                 top: 24.0,
-                right: 4.0,
+                right: 24.0,
                 bottom: 16.0,
                 left: 24.0,
             })
@@ -733,7 +733,7 @@ fn view(app: &App) -> Element<'_, Message> {
                     .into(),
                 ),
                 border: iced::Border {
-                    radius: 16.into(),
+                    radius: 6.into(),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -937,78 +937,158 @@ fn palette_background(app: &App) -> iced::Background {
     }
     iced::Background::Gradient(gradient.into())
 }
-fn sidebar(app: &App) -> Element<'_, Message> {
-    let mut links = column![
-        iced::widget::responsive(move |size| {
-            // Консервативный бюджет учитывает широкие символы и внутренние отступы.
-            let budget = ((size.width - 8.0) / 13.0).floor().max(3.0) as usize;
-            button(
-                text(short_path(&app.directory, budget))
-                    .size(13)
-                    .wrapping(text::Wrapping::None),
-            )
-            .padding([10, 4])
-            .width(Fill)
-            .style(button::text)
-            .on_press(Message::EditPath)
-            .into()
+// Размер места под будущие иконки не зависит от временного символа.
+fn sidebar_icon(name: &str, enabled: bool) -> Element<'_, Message> {
+    use iced::widget::svg;
+    // SVG включены в бинарник: внешний каталог ресурсов при запуске не нужен.
+    let bytes: &[u8] = match name {
+        "arrow-left" => include_bytes!("../assets/icons/lucide/arrow-left.svg"),
+        "arrow-right" => include_bytes!("../assets/icons/lucide/arrow-right.svg"),
+        "arrow-up" => include_bytes!("../assets/icons/lucide/arrow-up.svg"),
+        "house" => include_bytes!("../assets/icons/lucide/house.svg"),
+        "monitor" => include_bytes!("../assets/icons/lucide/monitor.svg"),
+        "file-text" => include_bytes!("../assets/icons/lucide/file-text.svg"),
+        "download" => include_bytes!("../assets/icons/lucide/download.svg"),
+        "music" => include_bytes!("../assets/icons/lucide/music.svg"),
+        "image" => include_bytes!("../assets/icons/lucide/image.svg"),
+        "clapperboard" => include_bytes!("../assets/icons/lucide/clapperboard.svg"),
+        "hard-drive" => include_bytes!("../assets/icons/lucide/hard-drive.svg"),
+        "history" => include_bytes!("../assets/icons/lucide/history.svg"),
+        "palette" => include_bytes!("../assets/icons/lucide/palette.svg"),
+        _ => unreachable!("Неизвестная иконка боковой панели"),
+    };
+    svg(svg::Handle::from_memory(bytes))
+        .width(20)
+        .height(20)
+        .style(move |theme: &Theme, _| svg::Style {
+            color: Some(
+                button::text(
+                    theme,
+                    if enabled {
+                        button::Status::Active
+                    } else {
+                        button::Status::Disabled
+                    },
+                )
+                .text_color,
+            ),
         })
-        .height(40),
-        row![
-            action("←", Message::Back, app.can_back()),
-            action("→", Message::Forward, app.can_forward()),
-            action("↑", Message::Up, app.directory.parent().is_some())
-        ]
-        .spacing(2),
-        space().height(12),
-        text("БЫСТРЫЙ ДОСТУП").size(10)
+        .into()
+}
+fn sidebar_style(theme: &Theme, status: button::Status, active: bool) -> button::Style {
+    let mut style = button::text(theme, status);
+    style.border.radius = 8.into();
+    let opacity = match status {
+        button::Status::Hovered => 0.12,
+        button::Status::Pressed => 0.16,
+        _ if active => 0.09,
+        _ => 0.0,
+    };
+    style.background = Some(theme.palette().text.scale_alpha(opacity).into());
+    style
+}
+fn sidebar_tool<'a>(
+    symbol: &'a str,
+    label: &'a str,
+    message: Message,
+    enabled: bool,
+) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        button(sidebar_icon(symbol, enabled))
+            .padding(8)
+            .style(|theme, status| sidebar_style(theme, status, false))
+            .on_press_maybe(enabled.then_some(message)),
+        container(text(label).size(12))
+            .padding(8)
+            .style(container::rounded_box),
+        iced::widget::tooltip::Position::Top,
+    )
+    .into()
+}
+fn sidebar(app: &App) -> Element<'_, Message> {
+    let navigation = row![
+        sidebar_tool("arrow-left", "Назад", Message::Back, app.can_back()),
+        sidebar_tool("arrow-right", "Вперёд", Message::Forward, app.can_forward()),
+        sidebar_tool(
+            "arrow-up",
+            "Вверх",
+            Message::Up,
+            app.directory.parent().is_some()
+        )
     ]
-    .spacing(8);
-    for (label, path) in [
-        ("⌂   Главная", dirs::home_dir()),
-        ("▣   Рабочий стол", dirs::desktop_dir()),
-        ("▤   Документы", dirs::document_dir()),
-        ("↓   Загрузки", dirs::download_dir()),
-        ("♫   Музыка", dirs::audio_dir()),
-        ("▧   Изображения", dirs::picture_dir()),
-        ("▷   Видео", dirs::video_dir()),
+    .spacing(4);
+    let path = iced::widget::responsive(move |size| {
+        let budget = ((size.width - 24.0) / 13.0).floor().max(3.0) as usize;
+        button(
+            text(short_path(&app.directory, budget))
+                .size(13)
+                .wrapping(text::Wrapping::None),
+        )
+        .padding([12, 12])
+        .width(Fill)
+        .style(|theme: &Theme, status| {
+            let mut style = sidebar_style(theme, status, false);
+            if matches!(status, button::Status::Active) {
+                style.background = Some(theme.palette().text.scale_alpha(0.06).into());
+            }
+            style
+        })
+        .on_press(Message::EditPath)
+        .into()
+    })
+    .height(44);
+    let section = |label| {
+        text(label).size(11).style(|theme: &Theme| text::Style {
+            color: Some(theme.palette().text.scale_alpha(0.6)),
+        })
+    };
+    let mut links = column![container(section("Быстрый доступ")).padding([8, 12])].spacing(4);
+    for (symbol, label, path) in [
+        ("house", "Главная", dirs::home_dir()),
+        ("monitor", "Рабочий стол", dirs::desktop_dir()),
+        ("file-text", "Документы", dirs::document_dir()),
+        ("download", "Загрузки", dirs::download_dir()),
+        ("music", "Музыка", dirs::audio_dir()),
+        ("image", "Изображения", dirs::picture_dir()),
+        ("clapperboard", "Видео", dirs::video_dir()),
+        ("hard-drive", "Файловая система", Some(PathBuf::from("/"))),
     ] {
         if let Some(path) = path {
             let active = path == app.directory;
+            if path == PathBuf::from("/") {
+                links = links
+                    .push(space().height(8))
+                    .push(container(section("Устройства")).padding([8, 12]));
+            }
             links = links.push(
-                button(text(label).size(13))
-                    .width(Fill)
-                    .padding([10, 12])
-                    .style(move |theme: &Theme, status| {
-                        let mut style = button::text(theme, status);
-                        style.border.radius = 9.into();
-                        if active {
-                            style.background = Some(theme.palette().text.scale_alpha(0.09).into());
-                        }
-                        style
-                    })
-                    .on_press(Message::Navigate(path)),
+                button(
+                    row![sidebar_icon(symbol, true), text(label).size(13)]
+                        .spacing(10)
+                        .align_y(iced::Center),
+                )
+                .width(Fill)
+                .padding([10, 12])
+                .style(move |theme, status| sidebar_style(theme, status, active))
+                .on_press(Message::Navigate(path)),
             );
         }
     }
-    links = links
-        .push(space().height(16))
-        .push(text("УСТРОЙСТВА").size(10))
-        .push(
-            action(
-                "▱   Файловая система",
-                Message::Navigate(PathBuf::from("/")),
-                true,
-            )
-            .width(Fill),
-        );
-    let panel = column![
-        scrollable(links).height(Fill),
-        action("История", Message::History, true),
-        action("◉   Цвета оформления", Message::Palette, true)
+    let tools = row![
+        sidebar_tool("history", "История", Message::History, true),
+        space().width(Fill),
+        sidebar_tool("palette", "Цвета оформления", Message::Palette, true)
     ]
-    .spacing(4);
-    mouse_area(container(panel).padding([22, 12]).width(210).height(Fill))
+    .spacing(4)
+    .align_y(iced::Center);
+    let panel = column![
+        navigation,
+        path,
+        space().height(4),
+        scrollable(links).height(Fill),
+        tools
+    ]
+    .spacing(8);
+    mouse_area(container(panel).padding([12, 10]).width(210).height(Fill))
         .on_right_press(Message::Context(None))
         .into()
 }
