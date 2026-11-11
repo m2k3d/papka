@@ -6,7 +6,7 @@ trap 'rm -rf -- "$test_dir"' EXIT
 cp -- "$project_dir/Cargo.toml" "$project_dir/Cargo.lock" "$test_dir/"
 cp -R -- "$project_dir/src" "$test_dir/src"
 cp -R -- "$project_dir/assets" "$test_dir/assets"
-cat -- "$project_dir/tests/support/ui_navigation.rs" "$project_dir/tests/support/ui_grid.rs" >> "$test_dir/src/ui.rs"
+cat -- "$project_dir/tests/support/ui_navigation.rs" "$project_dir/tests/support/ui_grid.rs" "$project_dir/tests/support/app_state.rs" >> "$test_dir/src/ui.rs"
 # Дополнительные зависимости и advanced нужны только тестовому harness.
 sed -i 's/"tokio"/"tokio", "advanced"/' "$test_dir/Cargo.toml"
 cat >> "$test_dir/Cargo.toml" <<'DEPS'
