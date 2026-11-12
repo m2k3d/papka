@@ -18,7 +18,10 @@ pub(super) fn view(app: &App) -> Element<'_, Message> {
     content = panels::notices(app, ready, content);
     content = panels::operation_dialog(app, ready, content);
     if app.show_settings {
-        content = content.push(panels::settings(app));
+        content = content.push(super::widgets::dismiss_on_outside_press(
+            panels::settings(app),
+            Message::CloseSettings,
+        ));
     }
     if app.show_history {
         content = content.push(panels::history(app, idle));

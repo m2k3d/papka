@@ -41,6 +41,7 @@ pub(super) enum Message {
     Dismiss,
     ClearError,
     Settings,
+    CloseSettings,
     Palette,
     ClosePalette,
     PaletteSelect(usize),

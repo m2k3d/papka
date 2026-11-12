@@ -100,6 +100,7 @@ pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
             return iced::widget::operation::focus("operation-input");
         }
         Message::Settings => app.toggle_settings(),
+        Message::CloseSettings => app.show_settings = false,
         Message::Details(id) => app.toggle_history_details(id),
         Message::History => app.toggle_history(),
         Message::Page(next) => app.change_page(next),
