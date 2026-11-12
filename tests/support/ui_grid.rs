@@ -977,6 +977,7 @@ mod grid_tests {
         assert_eq!(saved.palette, app.settings.palette);
         assert_eq!(saved.palette_positions, app.settings.palette_positions);
         assert_eq!(saved.palette_intensity, 0.73);
+        assert_eq!(saved.palette_harmony, app.settings.palette_harmony);
         assert_eq!(app.page, 2);
         assert!(app.loading.is_none());
         bg.shutdown();
@@ -1227,6 +1228,8 @@ mod grid_tests {
         app.selection.insert(selected);
         let selection = app.selection.clone();
         app.settings.palette = [0x112233, 0x445566, 0x778899];
+        // Независимые пользовательские цвета проверяются в свободной схеме.
+        app.settings.palette_harmony = None;
         apply(&mut app, Message::Palette);
         apply(&mut app, Message::PaletteSelect(1));
         apply(&mut app, Message::PaletteCount(2));
@@ -1235,7 +1238,9 @@ mod grid_tests {
         apply(&mut app, Message::PaletteCount(2));
         assert_eq!(app.palette_active, 1);
         apply(&mut app, Message::PalettePoint(1, [-1., 2.]));
-        assert_eq!(app.settings.palette_positions[1], [0., 1.]);
+        let p = app.settings.wheel_position(1);
+        assert!(((p[0] - 0.5).hypot(p[1] - 0.5) - 0.5).abs() < 0.00001);
+        assert!(p[0] < 0.5 && p[1] > 0.5);
         let original = app.settings.palette_positions;
         for _ in 0..4 {
             apply(&mut app, Message::PaletteCombination);
@@ -1271,8 +1276,8 @@ mod grid_tests {
         let mut state = palette_field::State::default();
         let bounds = Rectangle::new(Point::ORIGIN, Size::new(330., 300.));
         let p = Point::new(
-            28. + settings.palette_positions[0][0] * 274.,
-            28. + settings.palette_positions[0][1] * 244.,
+            165. + (settings.wheel_position(0)[0] - 0.5) * 244.,
+            150. + (settings.wheel_position(0)[1] - 0.5) * 244.,
         );
         let press =
             iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
@@ -1331,6 +1336,30 @@ mod grid_tests {
             field.mouse_interaction(&state, bounds, iced::mouse::Cursor::Unavailable),
             iced::mouse::Interaction::Grabbing,
             "после потери фокуса жест должен завершаться"
+        );
+        assert!(
+            field
+                .update(
+                    &mut state,
+                    &iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: moved }),
+                    bounds,
+                    iced::mouse::Cursor::Available(moved)
+                )
+                .is_none()
+        );
+        assert!(
+            field
+                .update(
+                    &mut state,
+                    &press,
+                    bounds,
+                    iced::mouse::Cursor::Available(p)
+                )
+                .is_some()
+        );
+        assert_eq!(
+            field.mouse_interaction(&state, bounds, iced::mouse::Cursor::Available(p)),
+            iced::mouse::Interaction::Grabbing
         );
     }
 
@@ -1469,5 +1498,235 @@ mod grid_tests {
             !g.has_overlay,
             "наведение на имя файла не должно создавать tooltip overlay"
         );
+    }
+    #[test]
+    fn harmony_hex_validation_explains_unapplied_input_and_recovers() {
+        let mut app = App::default();
+        apply(&mut app, Message::Palette);
+        let before = app.settings.palette;
+        for value in [
+            "",
+            "12345",
+            "1234567",
+            "GG0000",
+            "##123456",
+            "+12345",
+            "１２３４５６",
+        ] {
+            apply(&mut app, Message::PaletteColor(0, value.into()));
+            assert_eq!(
+                app.settings.palette, before,
+                "невалидный {value:?} изменил палитру"
+            );
+            assert!(!app.palette_input_valid(0));
+        }
+        let (g, _, _) = inspect(&app, Size::new(1120., 900.), &[]);
+        assert!(
+            g.labels
+                .iter()
+                .any(|s| s == "Enter 6 HEX digits (RRGGBB). Color not applied.")
+        );
+        apply(&mut app, Message::PaletteColor(0, " #aBcDeF ".into()));
+        assert!(app.palette_input_valid(0));
+        assert_eq!(app.settings.palette[0], 0xabcdef);
+        let (g, _, _) = inspect(&app, Size::new(1120., 900.), &[]);
+        assert!(!g.labels.iter().any(|s| s.contains("Color not applied")));
+    }
+
+    #[test]
+    fn harmony_theme_and_all_palette_messages_preserve_page_and_selection() {
+        let mut app = App::default();
+        app.page = 3;
+        app.selection
+            .insert(app.directory.join("temporary-selection-marker"));
+        let selection = app.selection.clone();
+        for message in [
+            Message::Palette,
+            Message::Dark(true),
+            Message::Dark(false),
+            Message::PaletteSelect(1),
+            Message::PaletteColor(1, "ABCDEF".into()),
+            Message::PalettePoint(1, [0.4, 0.3]),
+            Message::PaletteCombination,
+            Message::PaletteCount(2),
+            Message::PaletteIntensity(0.7),
+            Message::PaletteCommit,
+            Message::Preset(crate::files::Settings::DEFAULT_PALETTE),
+            Message::ClosePalette,
+        ] {
+            apply(&mut app, message);
+            assert_eq!(app.page, 3);
+            assert_eq!(app.selection, selection);
+            assert!(app.loading.is_none());
+        }
+    }
+
+    #[test]
+    fn harmony_overlapping_points_can_be_selected_without_moving_another_point() {
+        let mut app = App::default();
+        app.settings
+            .apply_palette_harmony(crate::files::PaletteHarmony::Custom);
+        app.settings.palette_positions = [[0.6, 0.5]; 3];
+        app.settings.palette = [0xabcdef; 3];
+        apply(&mut app, Message::Palette);
+        let colors = app.settings.palette;
+        let positions = app.settings.palette_positions;
+        for index in 0..3 {
+            let (g, _, _) = inspect(&app, Size::new(1120., 900.), &[]);
+            let label = (index + 1).to_string();
+            let r = g.texts.iter().find(|(s, _)| s == &label).unwrap().1;
+            let point = Point::new(r.center_x(), r.center_y());
+            let (_, _, messages) = inspect(
+                &app,
+                Size::new(1120., 900.),
+                &[
+                    (
+                        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                            iced::mouse::Button::Left,
+                        )),
+                        point,
+                    ),
+                    (
+                        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                            iced::mouse::Button::Left,
+                        )),
+                        point,
+                    ),
+                ],
+            );
+            assert!(
+                messages
+                    .iter()
+                    .any(|m| matches!(m, Message::PaletteSelect(i) if *i == index)),
+                "не выбран индекс {index}: {messages:?}"
+            );
+            for message in messages {
+                apply(&mut app, message);
+            }
+            assert_eq!(app.palette_active, index);
+            assert_eq!(app.settings.palette, colors);
+            assert_eq!(app.settings.palette_positions, positions);
+        }
+    }
+
+    #[test]
+    fn harmony_canvas_drag_preserves_grab_offset_and_clamps_in_non_square_bounds() {
+        use iced::widget::canvas::Program;
+        let settings = crate::files::Settings::default();
+        let field = palette_field::Field {
+            settings: &settings,
+            active: 0,
+            editor: true,
+        };
+        let mut state = palette_field::State::default();
+        let bounds = Rectangle::new(Point::new(70., 90.), Size::new(330., 300.));
+        let p = settings.wheel_position(0);
+        let center = Point::new(
+            bounds.center_x() + (p[0] - 0.5) * 244.,
+            bounds.center_y() + (p[1] - 0.5) * 244.,
+        );
+        let grab = center + iced::Vector::new(8., -4.);
+        let press =
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left));
+        field
+            .update(
+                &mut state,
+                &press,
+                bounds,
+                iced::mouse::Cursor::Available(grab),
+            )
+            .unwrap();
+        let movement = iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: grab });
+        let action = field
+            .update(
+                &mut state,
+                &movement,
+                bounds,
+                iced::mouse::Cursor::Available(grab),
+            )
+            .unwrap()
+            .into_inner();
+        let Some(Message::PalettePoint(0, actual)) = action.0 else {
+            panic!("{:?}", action.0);
+        };
+        for axis in 0..2 {
+            assert!((p[axis] - actual[axis]).abs() < 0.00001);
+        }
+        let outside = Point::new(1000., -1000.);
+        let action = field
+            .update(
+                &mut state,
+                &movement,
+                bounds,
+                iced::mouse::Cursor::Available(outside),
+            )
+            .unwrap()
+            .into_inner();
+        let Some(Message::PalettePoint(0, actual)) = action.0 else {
+            panic!("{:?}", action.0);
+        };
+        assert!(((actual[0] - 0.5).hypot(actual[1] - 0.5) - 0.5).abs() < 0.00001);
+        let release = iced::Event::Mouse(iced::mouse::Event::CursorLeft);
+        assert!(matches!(
+            field
+                .update(
+                    &mut state,
+                    &release,
+                    bounds,
+                    iced::mouse::Cursor::Unavailable
+                )
+                .unwrap()
+                .into_inner()
+                .0,
+            Some(Message::PaletteCommit)
+        ));
+        assert!(
+            field
+                .update(
+                    &mut state,
+                    &movement,
+                    bounds,
+                    iced::mouse::Cursor::Available(grab)
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn harmony_scheme_label_tracks_count_and_drag_keeps_it() {
+        let mut app = App::default();
+        apply(&mut app, Message::Palette);
+        for count in [3, 2, 1, 2, 3] {
+            apply(&mut app, Message::PaletteCount(count));
+            let choices = crate::files::PaletteHarmony::choices(count);
+            for _ in 0..choices.len() {
+                let scheme = app.settings.harmony();
+                apply(&mut app, Message::PalettePoint(0, [0.7, 0.4]));
+                assert_eq!(app.settings.harmony(), scheme);
+                let (g, _, _) = inspect(&app, Size::new(1120., 900.), &[]);
+                assert!(g.labels.contains(&scheme.to_string()));
+                apply(&mut app, Message::PaletteCombination);
+            }
+        }
+    }
+    #[test]
+    fn harmony_theme_keeps_shift_selection_anchor() {
+        let (_dir, mut app) = sample(3);
+        let paths: Vec<_> = app
+            .visible()
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect();
+        app.select_context(paths[0].clone());
+        app.page = 2;
+        apply(&mut app, Message::Dark(true));
+        app.selection_modifiers(false, true);
+        app.select(paths[2].clone());
+        assert_eq!(
+            app.selection.len(),
+            3,
+            "смена темы сбросила якорь выделения"
+        );
+        assert_eq!(app.page, 2);
     }
 }
