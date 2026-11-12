@@ -26,7 +26,9 @@ pub use checkpoint::SavedPath;
 pub use engine::{Command, Engine};
 pub use history_view::{HistoryItem, can_undo, details, undo_label};
 pub use listing::{Entry, listing};
-pub use settings::{Settings, Sort, settings_load, settings_save};
+pub use settings::{
+    PaletteHarmony, Settings, Sort, circle_position, hsl_color, settings_load, settings_save,
+};
 
 use std::{
     path::PathBuf,

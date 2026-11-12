@@ -52,6 +52,8 @@ impl App {
     }
 
     pub fn set_palette_count(&mut self, count: u8) {
+        self.settings.prepare_palette_wheel();
+        let harmony = self.settings.harmony();
         let old = self.settings.palette_count.clamp(1, 3);
         if count.clamp(1, 3) < old {
             let remove = self.palette_active.min(old as usize - 1);
@@ -65,36 +67,68 @@ impl App {
         } else {
             self.palette_active.min((count.clamp(1, 3) - 1) as usize)
         };
+        self.settings
+            .apply_palette_harmony(harmony.for_count(self.settings.palette_count));
+        self.palette_inputs = self.settings.palette.map(|color| format!("{color:06X}"));
         self.persist_settings();
     }
 
+    pub fn set_palette_point(&mut self, index: usize, point: [f32; 2]) {
+        if index < self.settings.palette_count.clamp(1, 3) as usize {
+            self.palette_active = index;
+            self.settings.move_palette_point(index, point);
+            self.palette_inputs = self.settings.palette.map(|color| format!("{color:06X}"));
+        }
+    }
+
     pub fn set_palette_color(&mut self, index: usize, value: String) {
-        if index < 3 {
-            self.palette_inputs[index] = value.clone();
-            let hex = value.trim().trim_start_matches('#');
-            if hex.len() == 6 {
-                if let Ok(color) = u32::from_str_radix(hex, 16) {
-                    self.settings.palette[index] = color;
-                    self.persist_settings();
+        if index < self.settings.palette_count.clamp(1, 3) as usize {
+            self.palette_inputs[index] = value;
+            if let Some(color) = parse_palette_color(&self.palette_inputs[index]) {
+                self.settings.apply_palette_color(index, color);
+                for i in 0..3 {
+                    if i != index {
+                        self.palette_inputs[i] = format!("{:06X}", self.settings.palette[i]);
+                    }
                 }
+                self.persist_settings();
             }
         }
     }
 
+    pub fn palette_input_valid(&self, index: usize) -> bool {
+        self.palette_inputs
+            .get(index)
+            .is_some_and(|value| parse_palette_color(value).is_some())
+    }
+
     pub fn set_palette(&mut self, colors: [u32; 3]) {
+        let defaults = files::Settings::default();
         self.settings.palette = colors;
-        self.palette_inputs = colors.map(|color| format!("{color:06X}"));
+        self.settings.palette_count = defaults.palette_count;
+        self.settings.palette_positions = defaults.palette_positions;
+        self.settings.palette_intensity = defaults.palette_intensity;
+        self.settings.palette_combination = defaults.palette_combination;
+        self.settings.palette_harmony = None;
+        self.settings.prepare_palette_wheel();
+        if colors == files::Settings::DEFAULT_PALETTE {
+            self.settings
+                .apply_palette_harmony(files::PaletteHarmony::Triadic);
+        }
+        self.palette_active = 0;
+        self.palette_inputs = self.settings.palette.map(|color| format!("{color:06X}"));
         self.persist_settings();
     }
 
     pub fn cycle_palette_combination(&mut self) {
-        self.settings.palette_combination = (self.settings.palette_combination % 4 + 1) % 4;
-        self.settings.palette_positions = match self.settings.palette_combination {
-            1 => [[0.22, 0.3], [0.5, 0.5], [0.78, 0.7]],
-            2 => [[0.25, 0.5], [0.75, 0.5], [0.5, 0.22]],
-            3 => [[0.5, 0.22], [0.25, 0.72], [0.75, 0.72]],
-            _ => [[0.64, 0.28], [0.25, 0.5], [0.57, 0.76]],
-        };
+        let choices = files::PaletteHarmony::choices(self.settings.palette_count);
+        let current = choices
+            .iter()
+            .position(|&h| h == self.settings.harmony())
+            .unwrap_or(choices.len() - 1);
+        self.settings
+            .apply_palette_harmony(choices[(current + 1) % choices.len()]);
+        self.palette_inputs = self.settings.palette.map(|color| format!("{color:06X}"));
         self.persist_settings();
     }
 
@@ -106,7 +140,7 @@ impl App {
 
     pub fn set_dark(&mut self, value: bool) {
         self.settings.dark = value;
-        self.save_settings();
+        self.persist_settings();
     }
 
     pub fn set_reduced_motion(&mut self, value: bool) {
@@ -123,4 +157,12 @@ impl App {
         self.settings.sort = value;
         self.save_settings();
     }
+}
+
+fn parse_palette_color(value: &str) -> Option<u32> {
+    let hex = value.trim();
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    (hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
 }

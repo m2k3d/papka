@@ -55,12 +55,7 @@ pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
         Message::PaletteSelect(index) => {
             app.palette_active = index.min(app.settings.palette_count.clamp(1, 3) as usize - 1)
         }
-        Message::PalettePoint(index, position) => {
-            if index < app.settings.palette_count.clamp(1, 3) as usize {
-                app.palette_active = index;
-                app.settings.palette_positions[index] = position.map(|v| v.clamp(0.0, 1.0));
-            }
-        }
+        Message::PalettePoint(index, position) => app.set_palette_point(index, position),
         Message::PaletteIntensity(value) => app.settings.palette_intensity = value.clamp(0.0, 1.0),
         Message::PaletteCommit => app.persist_settings(),
         Message::PaletteCombination => app.cycle_palette_combination(),
