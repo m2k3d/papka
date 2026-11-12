@@ -12,6 +12,8 @@ pub enum Command {
     Create(PathBuf, bool),
     Copy(Vec<PathBuf>, PathBuf),
     Move(Vec<PathBuf>, PathBuf),
+    ReceiveMove(Vec<PathBuf>, PathBuf),
+    FinishExternalMove(super::DragSnapshot),
     Rename(PathBuf, PathBuf),
     Trash(Vec<PathBuf>),
     Undo(u64),
@@ -105,10 +107,12 @@ impl Engine {
                 })
                 .unwrap_or_default();
             let retry = match original {
-                Command::Copy(paths, target) => Some(Command::Copy(
-                    paths.into_iter().filter(|p| !done.contains(p)).collect(),
-                    target,
-                )),
+                Command::Copy(paths, target) | Command::ReceiveMove(paths, target) => {
+                    Some(Command::Copy(
+                        paths.into_iter().filter(|p| !done.contains(p)).collect(),
+                        target,
+                    ))
+                }
                 Command::Move(paths, target) => Some(Command::Move(
                     paths
                         .into_iter()

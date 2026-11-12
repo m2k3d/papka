@@ -8,6 +8,16 @@ use iced::Task;
 
 pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
     match message {
+        Message::DndAttach(Some(id)) => {
+            return iced::window::run(id, |window| {
+                Message::DndAttached(crate::platform::NativeDnd::attach(&window))
+            });
+        }
+        Message::DndAttach(None) => {}
+        Message::DndAttached(native) => app.dnd.native = native,
+        Message::DndWake => return super::dnd::wake(app),
+        Message::DragStart(path) => super::dnd::start(app, path),
+        Message::DropZones(zones, events) => super::dnd::events(app, zones, events),
         Message::SidebarResizeStart => {
             if app.context_menu.is_none()
                 && !app.show_path
@@ -45,8 +55,24 @@ pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
         }
         Message::CopySelection(moving) => app.copy_selection(moving),
         Message::Paste => app.paste(),
-        Message::Ready(background) => app.ready(background),
-        Message::Event(event) => app.apply(event),
+        Message::Ready(background) => {
+            app.ready(background);
+            return iced::window::oldest().map(Message::DndAttach);
+        }
+        Message::Event(event) => {
+            // Подтверждение Move отправляется только по сохранённому успешному итогу.
+            let dnd_event = matches!(
+                &event,
+                crate::operations::Event::Finished { .. }
+                    | crate::operations::Event::Data {
+                        data: crate::files::Data::DragPrepared(..), ..
+                    }
+            ).then(|| event.clone());
+            app.apply(event);
+            if let Some(event) = dnd_event {
+                super::dnd::background(app, &event);
+            }
+        }
         Message::Failed(error) => app.set_error(error),
         Message::Path(path) => app.set_path_input(path),
         Message::Navigate(path) => app.navigate(path),
@@ -114,8 +140,10 @@ pub(super) fn update(app: &mut App, message: Message) -> Task<Message> {
     finish(app)
 }
 
-pub(super) fn finish(app: &App) -> Task<Message> {
+pub(super) fn finish(app: &mut App) -> Task<Message> {
+    super::dnd::sync_actions(app);
     if app.closing && app.can_close() {
+        app.dnd.detach();
         return iced::exit();
     }
     Task::none()

@@ -21,3 +21,7 @@ pub use filesystem::{
 pub use open::open_file;
 #[cfg(target_os = "linux")]
 pub use trash::{trash_directory, trash_info_path, trash_target, write_trash_info};
+
+#[path = "platform/linux/dnd.rs"]
+mod dnd;
+pub use dnd::{NativeDnd, Wake as DndWake};

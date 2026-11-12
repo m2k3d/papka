@@ -7,6 +7,12 @@ use iced::{Subscription, keyboard};
 pub(super) fn subscription(app: &App) -> Subscription<Message> {
     Subscription::batch([
         Subscription::run(background_events),
+        app.dnd
+            .native
+            .as_ref()
+            .map_or_else(Subscription::none, |native| {
+                Subscription::run_with(native.wake.clone(), super::dnd::notifications)
+            }),
         iced::event::listen_with(|event, status, _| {
             if matches!(
                 event,

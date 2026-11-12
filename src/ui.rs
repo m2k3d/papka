@@ -1,5 +1,7 @@
 //! Интерфейс Iced: запуск и границы компонентов.
 mod context_menu;
+mod dnd;
+mod drop_zone;
 mod grid;
 mod icons;
 mod input;

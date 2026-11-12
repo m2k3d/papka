@@ -66,6 +66,7 @@ pub struct App {
     pub transition: Option<std::time::Instant>,
     pub last_sidebar_scroll: Option<std::time::Instant>,
     pub last_file_scroll: Option<std::time::Instant>,
+    pub(crate) dnd: state::DragState,
     pub clipboard: Option<(Vec<PathBuf>, bool)>,
 }
 #[derive(Debug, Clone)]
@@ -119,12 +120,14 @@ impl Default for App {
             last_sidebar_scroll: None,
             last_file_scroll: None,
             clipboard: None,
+            dnd: Default::default(),
         }
     }
 }
 
 impl Drop for App {
     fn drop(&mut self) {
+        self.dnd.detach();
         if let Some(background) = &self.background {
             background.shutdown();
         }

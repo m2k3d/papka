@@ -151,24 +151,23 @@ pub(super) fn file_grid<'a>(
             ]
             .spacing(4)
             .align_x(iced::Center);
-            cards = cards.push(
-                mouse_area(
-                    button(card)
-                        .width(card_width)
-                        .padding(6)
-                        .style(move |theme: &Theme, status| {
-                            let mut style = button::text(theme, status);
-                            style.border.radius = 12.into();
-                            if selected {
-                                style.background =
-                                    Some(theme.palette().primary.scale_alpha(0.18).into());
-                            }
-                            style
-                        })
-                        .on_press_maybe(idle.then(|| Message::Select(entry.path.clone()))),
-                )
-                .on_right_press(Message::Context(Some(entry.path.clone()))),
-            );
+            let drop_hovered = app.dnd.hover.as_ref() == Some(&entry.path);
+            let card = mouse_area(button(card).width(card_width).padding(6).style(
+                move |theme: &Theme, status| {
+                    let mut style = button::text(theme, status);
+                    style.border.radius = 12.into();
+                    if selected || drop_hovered {
+                        style.background = Some(theme.palette().primary.scale_alpha(0.18).into());
+                    }
+                    style
+                },
+            ))
+            .on_right_press(Message::Context(Some(entry.path.clone())));
+            cards = cards.push(super::drop_zone::zone(
+                card.into(),
+                idle.then(|| entry.path.clone()),
+                entry.directory.then(|| entry.path.clone()),
+            ));
             if (index + 1) % columns == 0 {
                 rows = rows.push(cards);
                 cards = row![].spacing(gap).width(Fill);
@@ -193,7 +192,16 @@ pub(super) fn file_grid<'a>(
     )
     .id("files")
     .on_scroll(|_| Message::FilesScrolled);
-    files.into()
+    let hovered = app.dnd.hover.as_ref() == Some(&app.directory);
+    let files = container(files).style(move |theme: &Theme| container::Style {
+        border: iced::Border {
+            width: if hovered { 1.0 } else { 0.0 },
+            color: theme.palette().primary.scale_alpha(0.6),
+            radius: 8.into(),
+        },
+        ..Default::default()
+    });
+    super::drop_zone::zone(files.into(), None, Some(app.directory.clone()))
 }
 
 pub(super) fn footer(app: &App, ready: bool, page: usize, pages: usize) -> Element<'_, Message> {

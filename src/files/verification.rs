@@ -52,9 +52,7 @@ pub(super) fn collect(path: &Path, nodes: &mut Vec<Node>, context: &Context) -> 
 }
 pub(super) fn unchanged(nodes: &[Node], context: &Context) -> io::Result<()> {
     if nodes.is_empty() {
-        return Err(io::Error::other(
-            "No confirmed data for a safe undo.",
-        ));
+        return Err(io::Error::other("No confirmed data for a safe undo."));
     }
     for node in nodes {
         let path = node.path.path();
@@ -65,4 +63,50 @@ pub(super) fn unchanged(nodes: &[Node], context: &Context) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Снимок источников до передачи стороннему приложению.
+#[derive(Debug, Clone)]
+pub struct DragSnapshot(Vec<Node>);
+impl DragSnapshot {
+    pub fn capture(paths: &[std::path::PathBuf], ctx: &Context) -> io::Result<Self> {
+        if paths.is_empty() || paths.len() > 100 {
+            return Err(io::Error::other("Drag between 1 and 100 items."));
+        }
+        let mut nodes = Vec::new();
+        for path in paths {
+            collect(path, &mut nodes, ctx)?;
+        }
+        Ok(Self(nodes))
+    }
+    pub fn paths(&self) -> Vec<std::path::PathBuf> {
+        self.0.iter().map(|node| node.path.path()).collect()
+    }
+    /// Получатель может сам переместить источник до подтверждения протокола.
+    pub(super) fn remaining(&self) -> io::Result<Self> {
+        let mut nodes = Vec::new();
+        for node in &self.0 {
+            match fs::symlink_metadata(node.path.path()) {
+                Ok(_) => nodes.push(node.clone()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(Self(nodes))
+    }
+    pub(super) fn verify(&self, ctx: &Context) -> io::Result<()> {
+        unchanged(&self.0, ctx).map_err(|error| {
+            io::Error::other(format!(
+                "Drag sources could not be verified; originals preserved: {error}"
+            ))
+        })
+    }
+    pub(super) fn verify_path(&self, path: &Path, ctx: &Context) -> io::Result<()> {
+        let node = self
+            .0
+            .iter()
+            .find(|node| node.path.path() == path)
+            .ok_or_else(|| io::Error::other("Unknown drag source; original preserved."))?;
+        unchanged(std::slice::from_ref(node), ctx)
+    }
 }

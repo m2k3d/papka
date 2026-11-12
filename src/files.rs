@@ -23,6 +23,7 @@ mod undo;
 mod verification;
 
 pub use checkpoint::SavedPath;
+pub use verification::DragSnapshot;
 pub use engine::{Command, Engine};
 pub use history_view::{HistoryItem, can_undo, details, undo_label};
 pub use listing::{Entry, listing};
@@ -44,6 +45,7 @@ pub fn now() -> u64 {
 
 #[derive(Debug, Clone)]
 pub enum Data {
+    DragPrepared(u64, Result<DragSnapshot, String>),
     ListingBegin(PathBuf),
     ListingBatch(Vec<Entry>),
     ListingEnd(Option<String>),

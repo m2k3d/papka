@@ -7,6 +7,11 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub(super) enum Message {
+    DndAttach(Option<iced::window::Id>),
+    DndAttached(Option<crate::platform::NativeDnd>),
+    DndWake,
+    DragStart(PathBuf),
+    DropZones(Vec<(PathBuf, iced::Rectangle)>, Vec<guth_wayland_dnd::DndEvent>),
     SidebarResizeStart,
     Context(Option<PathBuf>),
     SidebarContext(Option<PathBuf>),

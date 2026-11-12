@@ -1185,6 +1185,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "guth-wayland-dnd"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e2ac43f1615286be09427d10c960dca6bd102913f9d2f5d3ad36a5b4a923c7e"
+dependencies = [
+ "raw-window-handle",
+ "rustix 1.1.6",
+ "smithay-client-toolkit 0.20.0",
+ "wayland-backend",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2325,6 +2337,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "dirs",
+ "guth-wayland-dnd",
  "iced",
  "libc",
  "serde",

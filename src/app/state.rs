@@ -52,3 +52,33 @@ impl Default for WorkState {
         }
     }
 }
+
+#[derive(Default)]
+pub(crate) struct DragState {
+    pub native: Option<crate::platform::NativeDnd>,
+    pub held: bool,
+    pub active: bool,
+    pub self_hover: bool,
+    pub generation: u64,
+    pub preparing: Option<crate::operations::Ticket>,
+    pub snapshot: Option<crate::files::DragSnapshot>,
+    pub hover: Option<PathBuf>,
+    pub incoming: Option<(u64, u64)>,
+    pub outgoing_cleanup: Option<u64>,
+    pub incoming_allowed: bool,
+}
+impl DragState {
+    pub fn detach(&mut self) {
+        if let Some(ticket) = self.preparing.take() {
+            ticket.cancellation.request();
+        }
+        self.native = None;
+        self.snapshot = None;
+        self.active = false;
+        self.held = false;
+        self.hover = None;
+        self.incoming_allowed = false;
+        self.self_hover = false;
+        self.incoming = None;
+    }
+}

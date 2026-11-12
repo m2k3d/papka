@@ -5,7 +5,7 @@ use super::{
     verification::unchanged,
 };
 use crate::{
-    history::{Action, Record},
+    history::{Action, Record, ResultKind},
     operations::Context,
     platform::{self, sync_parent},
 };
@@ -22,6 +22,7 @@ impl Engine {
             .ok_or_else(|| io::Error::other("Action not found in history."))?;
         let mut cp: Checkpoint = serde_json::from_slice(&record.checkpoint)?;
         verify_undo(&record, &cp, ctx)?;
+        let copy_undo = undo_as_copy(&record, &cp);
         cp.undoing = true;
         journal.update_record(id, encode(&cp)?)?;
         for index in (0..cp.items.len()).rev() {
@@ -36,11 +37,7 @@ impl Engine {
             }
             unchanged(&cp.items[index].nodes, ctx)?;
             let item = &cp.items[index];
-            if matches!(
-                record.action,
-                Action::Copy | Action::CreateFile | Action::CreateDirectory
-            ) || item.backup.is_some()
-            {
+            if copy_undo || item.backup.is_some() {
                 // Отмена копии сохраняет её в корзине, поэтому даже внешняя гонка
                 // не приводит к безвозвратной потере появившихся данных.
                 let target = item.target.path();
@@ -59,13 +56,23 @@ impl Engine {
                     sync_parent(&backup.path())?;
                 }
             } else {
-                platform::rename_exclusive(&item.target.path(), &item.source.path())?;
-                if let Some(info) = &item.trash_info {
+                match platform::rename_exclusive(&item.target.path(), &item.source.path()) {
+                    Ok(()) => {}
+                    Err(error)
+                        if error.raw_os_error() == Some(libc::EXDEV)
+                            && matches!(record.action, Action::Move) =>
+                    {
+                        undo_move_across_devices(journal, id, &mut cp, index, ctx)?;
+                    }
+                    Err(error) => return Err(error),
+                }
+                if let Some(info) = &cp.items[index].trash_info {
                     fs::remove_file(info.path())?;
                 }
             }
             sync_parent(&cp.items[index].target.path())?;
-            if matches!(record.action, Action::Move | Action::Rename | Action::Trash) {
+            if !copy_undo && matches!(record.action, Action::Move | Action::Rename | Action::Trash)
+            {
                 sync_parent(&cp.items[index].source.path())?;
             }
             cp.items[index].undone = true;
@@ -97,15 +104,14 @@ fn verify_undo(record: &Record, cp: &Checkpoint, ctx: &Context) -> io::Result<()
     // Проверить все результаты до первого изменения.
     for item in cp.items.iter().filter(|i| i.done && !i.undone) {
         if item.nodes.is_empty() {
-            return Err(io::Error::other(
-                "No confirmed data for a safe undo.",
-            ));
+            return Err(io::Error::other("No confirmed data for a safe undo."));
         }
         unchanged(&item.nodes, ctx)?;
         if item.backup.is_some() {
             unchanged(&item.backup_nodes, ctx)?;
         }
-        if matches!(record.action, Action::Move | Action::Rename | Action::Trash)
+        if !undo_as_copy(record, cp)
+            && matches!(record.action, Action::Move | Action::Rename | Action::Trash)
             && fs::symlink_metadata(item.source.path()).is_ok()
         {
             return Err(io::Error::other(
@@ -114,5 +120,44 @@ fn verify_undo(record: &Record, cp: &Checkpoint, ctx: &Context) -> io::Result<()
         }
     }
 
+    Ok(())
+}
+
+/// Неуспешный внешний Move не разрешает отправителю удалять оригиналы.
+/// Его подтверждённые результаты отменяются как копии, с проверкой неизменности.
+fn undo_as_copy(record: &Record, cp: &Checkpoint) -> bool {
+    matches!(
+        record.action,
+        Action::Copy | Action::CreateFile | Action::CreateDirectory
+    ) || (matches!(record.action, Action::Move)
+        && cp.receive_move
+        && record
+            .finished
+            .as_ref()
+            .is_some_and(|finished| !matches!(finished.result, ResultKind::Success)))
+}
+
+/// Входящий внешний Move может не иметь локальной резервной копии источника.
+/// При ошибке сохраняем обе стороны и незавершённое состояние для ручного разбора.
+fn undo_move_across_devices(
+    journal: &mut crate::history::Journal,
+    id: u64,
+    cp: &mut Checkpoint,
+    index: usize,
+    ctx: &mut Context,
+) -> io::Result<()> {
+    let target = cp.items[index].target.path();
+    let original = cp.items[index].source.path();
+    super::copy::copy_tree(&target, &original, ctx, &mut |_, _| Ok(()), 0)?;
+    unchanged(&cp.items[index].nodes, ctx)?;
+    let trash = platform::trash_target(&target)?;
+    cp.items[index].undo_trash = Some(SavedPath::new(&trash));
+    journal.update_record(id, encode(cp)?)?;
+    platform::write_trash_info(&target, &platform::trash_info_path(&trash)?)?;
+    unchanged(&cp.items[index].nodes, ctx)?;
+    platform::rename_exclusive(&target, &trash)?;
+    sync_parent(&trash)?;
+    sync_parent(&target)?;
+    sync_parent(&original)?;
     Ok(())
 }

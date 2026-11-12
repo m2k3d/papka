@@ -107,7 +107,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
     };
     let mut links = column![container(section("Quick access")).padding([6, 10])].spacing(2);
     for path in &app.settings.quick_access {
-        let active = path == &app.directory;
+        let active = path == &app.directory || app.dnd.hover.as_ref() == Some(path);
         let symbol = [
             ("house", dirs::home_dir()),
             ("monitor", dirs::desktop_dir()),
@@ -137,7 +137,7 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
         .padding([6, 10])
         .style(move |theme, status| sidebar_style(theme, status, active))
         .on_press(Message::Navigate(path.clone()));
-        links = links.push(
+        links = links.push(super::drop_zone::zone(
             mouse_area(
                 iced::widget::tooltip(
                     destination,
@@ -148,8 +148,11 @@ pub(super) fn sidebar(app: &App) -> Element<'_, Message> {
                 )
                 .gap(4),
             )
-            .on_right_press(Message::SidebarContext(Some(path.clone()))),
-        );
+            .on_right_press(Message::SidebarContext(Some(path.clone())))
+            .into(),
+            None,
+            Some(path.clone()),
+        ));
     }
     links = links
         .push(space().height(6))

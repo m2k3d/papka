@@ -44,6 +44,9 @@ pub(super) struct Checkpoint {
     pub(super) version: u8,
     pub(super) items: Vec<Item>,
     pub(super) undoing: bool,
+    // Входящий Move до подтверждения протокола только копирует данные.
+    #[serde(default)]
+    pub(super) receive_move: bool,
 }
 pub(super) fn encode(cp: &Checkpoint) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(cp)?;

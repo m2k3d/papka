@@ -11,9 +11,23 @@ pub(super) struct Plan {
     pub(super) action: Action,
     pub(super) checkpoint: Checkpoint,
     pub(super) create: Option<bool>,
+    pub(super) receive_move: bool,
+    pub(super) drag_snapshot: Option<super::DragSnapshot>,
 }
 
 pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
+    let receive_move = matches!(&command, Command::ReceiveMove(..));
+    let drag_snapshot = match &command {
+        Command::FinishExternalMove(snapshot) => {
+            snapshot.verify(ctx)?;
+            Some(snapshot.clone())
+        }
+        _ => None,
+    };
+    let command = match command {
+        Command::FinishExternalMove(snapshot) => Command::Trash(snapshot.paths()),
+        other => other,
+    };
     let (action, pairs, create) = match command {
         Command::Create(path, directory) => (
             if directory {
@@ -25,7 +39,9 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
             Some(directory),
         ),
         Command::Copy(paths, directory) => (Action::Copy, targets(paths, directory)?, None),
-        Command::Move(paths, directory) => (Action::Move, targets(paths, directory)?, None),
+        Command::Move(paths, directory) | Command::ReceiveMove(paths, directory) => {
+            (Action::Move, targets(paths, directory)?, None)
+        }
         Command::Rename(a, b) => (Action::Rename, vec![(a, b)], None),
         Command::Trash(paths) => {
             let mut pairs = Vec::new();
@@ -35,7 +51,9 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
             }
             (Action::Trash, pairs, None)
         }
-        Command::Undo(_) | Command::Acknowledge(_) => unreachable!(),
+        Command::Undo(_) | Command::Acknowledge(_) | Command::FinishExternalMove(_) => {
+            unreachable!()
+        }
     };
     if pairs.is_empty() {
         return Err(io::Error::other("Nothing selected."));
@@ -49,6 +67,7 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
         version: 1,
         items: Vec::new(),
         undoing: false,
+        receive_move,
     };
     for (source, target) in pairs {
         if fs::symlink_metadata(&target).is_ok() {
@@ -96,6 +115,8 @@ pub(super) fn prepare(command: Command, ctx: &Context) -> io::Result<Plan> {
         action,
         checkpoint: cp,
         create,
+        receive_move,
+        drag_snapshot,
     })
 }
 

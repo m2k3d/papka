@@ -32,14 +32,43 @@ impl Engine {
                 .ok_or_else(|| io::Error::other("Incomplete record not found."))?;
             return journal.finish(id, ResultKind::Interrupted, record.checkpoint, now());
         }
+        let command = match command {
+            Command::FinishExternalMove(snapshot) => {
+                let remaining = snapshot.remaining()?;
+                if remaining.paths().is_empty() {
+                    ctx.data(super::Data::Warning(
+                        "Files were moved by another application. Use that application's history to undo.".into()
+                    ));
+                    return Ok(());
+                }
+                if remaining.paths().len() != snapshot.paths().len() {
+                    ctx.data(super::Data::Warning(
+                        "Some files were moved by another application. Its changes cannot be undone in papka.".into()
+                    ));
+                }
+                Command::FinishExternalMove(remaining)
+            }
+            other => other,
+        };
         let super::prepare::Plan {
             action,
             checkpoint: mut cp,
             create,
+            receive_move,
+            drag_snapshot,
         } = super::prepare::prepare(command, ctx)?;
         let journal = self.journal.as_mut().unwrap();
         let id = journal.begin(action.clone(), encode(&cp)?, now())?;
-        let result = execute_items(journal, id, &mut cp, &action, create, ctx);
+        let result = execute_items(
+            journal,
+            id,
+            &mut cp,
+            &action,
+            create,
+            receive_move,
+            drag_snapshot.as_ref(),
+            ctx,
+        );
         let kind = match &result {
             Ok(()) => ResultKind::Success,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => ResultKind::Interrupted,
@@ -64,6 +93,8 @@ fn execute_items(
     cp: &mut Checkpoint,
     action: &Action,
     create: Option<bool>,
+    receive_move: bool,
+    drag_snapshot: Option<&super::DragSnapshot>,
     ctx: &mut Context,
 ) -> io::Result<()> {
     for index in 0..cp.items.len() {
@@ -87,7 +118,7 @@ fn execute_items(
                     .open(&target)?
                     .sync_all()?;
             }
-        } else if matches!(action, Action::Copy) {
+        } else if matches!(action, Action::Copy) || receive_move {
             copy_tree(
                 &source,
                 &target,
@@ -100,6 +131,9 @@ fn execute_items(
                 0,
             )?;
         } else {
+            if let Some(snapshot) = drag_snapshot {
+                snapshot.verify_path(&source, ctx)?;
+            }
             if matches!(action, Action::Trash) {
                 platform::write_trash_info(
                     &source,
@@ -117,7 +151,7 @@ fn execute_items(
             }
         }
         sync_parent(&target)?;
-        if create.is_none() && !matches!(action, Action::Copy) {
+        if create.is_none() && !matches!(action, Action::Copy) && !receive_move {
             sync_parent(&source)?;
         }
         let mut nodes = Vec::new();

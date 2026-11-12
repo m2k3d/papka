@@ -19,6 +19,13 @@ pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
         | iced::Event::Mouse(iced::mouse::Event::CursorLeft)
         | iced::Event::Window(iced::window::Event::Unfocused) => {
             app.sidebar_drag_offset = None;
+            if matches!(
+                event,
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_))
+            ) || !app.dnd.active
+            {
+                super::dnd::cancel_preparation(app);
+            }
         }
         iced::Event::Window(iced::window::Event::Resized(size)) => {
             app.window_width = size.width;
@@ -64,6 +71,10 @@ pub(super) fn handle(app: &mut App, event: iced::Event) -> Task<Message> {
                     app.close_palette();
                 }
                 return Task::none();
+            }
+            if key == keyboard::Key::Named(Named::Escape) {
+                super::dnd::cancel_preparation(app);
+                app.dnd.hover = None;
             }
             let ctrl = modifiers.control();
             let shortcut = match key {
